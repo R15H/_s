@@ -1,4 +1,20 @@
 
+/*NOTES
+
+
+
+
+
+
+name conventions
+global_PID_MACHINE_TIMESTAMP.bin
+inst_ ...
+
+
+
+
+
+*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -33,13 +49,82 @@ struct FinalMetrics{
 };
 */
 
+#define SPLIT_STRUCT_STAT_FIELDS(struct_name, field_name, type) \
+    sprintf(filename, "%s_" #struct_name "_" #field_name "_%d.txt", destination_folder, run_number); \
+    file = fopen(filename, "w"); \
+    if (file == NULL){ \
+        printf("Error opening file\n"); \
+        return; \
+    }\
+    for (int i = 0; i < global_stat_bound; i++){ \
+        fwrite(&struct_name[i].field_name, sizeof(type), 1, file); \
+    }\
+    fclose(file);\
+    ;
+
+// same macro again, but for the bool fields that have only 1 bit each
+#define SPLIT_STRUCT_STAT_BIT_FIELD(struct_name, field_name, type) \
+    sprintf(filename, "%s_" #struct_name "_" #field_name "_%d.txt", destination_folder, run_number); \
+    file = fopen(filename, "w"); \
+    if (file == NULL){ \
+        printf("Error opening file\n"); \
+        return; \
+    }\
+    for (int i = 0; i < global_stat_bound; i++){ \
+        fwrite(&struct_name[i].field_name, sizeof(uint8_t), 1, file); \
+    }\
+    fclose(file);\
+    ;
+
 
 struct FinalMetrics{
     uint64_t address;
+    uint16_t totalTime ;
+    uint16_t stallTime ;
+    uint16_t L3stallTime ;
+    uint16_t lastStallTime; // First these store the cycles at start, then, we grab the end on the cpu and these store the difference
+    uint64_t stallCyclesMLPBoth ;
+    uint64_t stallCyclesMLPLoad ;
+    uint64_t stallCyclesMLPStore;
+    uint64_t L3stallCyclesMLPLoad;
+    //uint16_t stallCyclesMLPLoad = 0; // First these store the cycles at start, then, we grab the end on the cpu and these store the difference
+    //uint16_t stallCyclesMLPStore = 0;
+    //uint16_t stallCyclesMLPBoth = 0;
+    //uint16_t L3stallCyclesMLPLoad = 0; // First these store the cycles at start, then, we grab the end on the cpu and these store the difference
+
+    uint8_t MLP_store_at_start;
+    uint8_t MLP_store_at_end;
+    uint8_t MLP_load_at_start;
+    uint8_t MLP_load_at_end;
+
+    uint8_t L3MLP_store_at_start;
+    uint8_t L3MLP_store_at_middle; // aka at the middle of the request
+    uint8_t L3MLP_store_at_end ;
+    uint8_t L3MLP_load_at_start ;
+
+    uint8_t L3MLP_load_at_middle; // aka at the middle of the request
+    uint8_t L3MLP_load_at_end;
+    uint8_t isMicroop;
+    uint8_t tlb_miss;
+    uint8_t isLoad ;
+    uint8_t isStore ;
+
+    uint64_t start_cycle ; // at EA
+};
+
+/*
+struct FinalMetrics{
+    uint64_t address; ////////////// CHANGED
     uint16_t totalTime;
     uint16_t stallTime;
     uint16_t L3stallTime ;
     uint16_t lastStallTime; // First these store the cycles at start, then, we grab the end on the cpu and these store the difference
+
+    uint32_t stallCyclesMLPBoth = 0;
+    uint32_t stallCyclesMLPLoad = 0;
+    uint32_t stallCyclesMLPStore = 0;
+    uint32_t L3stallCyclesMLPLoad = 0;
+
     uint16_t stallCyclesMLPLoad; // First these store the cycles at start, then, we grab the end on the cpu and these store the difference
     uint16_t stallCyclesMLPStore;
     uint16_t stallCyclesMLPBoth ;
@@ -64,6 +149,7 @@ struct FinalMetrics{
     uint64_t start_cycle; // at EA
 
 };
+    */
 
 /*
 struct GlobalStatsss{
@@ -107,6 +193,7 @@ struct InstructionData {
     uint8_t accessBracket;
     bool tlbMiss;
 };
+
 
 struct GlobalStatsss{
 
@@ -184,17 +271,100 @@ size_t global_stat_bound;
 size_t inst_stat_bound;
 size_t aggregate_bound;
 
+#include <errno.h>
+
+void print_map_error(){
+    switch (errno) {
+            case EACCES:
+                printf("Error: Permission denied or requested access not allowed.\n");
+                break;
+            case EAGAIN:
+                printf("Error: Not enough resources to map the object.\n");
+                break;
+            case EBADF:
+                printf("Error: Invalid file descriptor.\n");
+                break;
+            case EINVAL:
+                printf("Error: Invalid arguments or unsupported flags.\n");
+                break;
+            case ENFILE:
+                printf("Error: System limit on total number of open files reached.\n");
+                break;
+            case ENOMEM:
+                printf("Error: Not enough memory available to map.\n");
+                break;
+            case ENODEV:
+                printf("Error: No suitable device, for example trying to mmap a non-shared file.\n");
+                break;
+            case EPERM:
+                printf("Error: Operation not permitted.\n");
+                break;
+            case ETXTBSY:
+                printf("Error: Text file is busy.\n");
+                break;
+            default:
+                printf("Error: Unknown mmap failure, errno = %d\n", errno);
+                break;
+        }
+}
+void print_open_error(){
+    switch (errno) {
+            case EACCES:
+                printf("Error: Permission denied or requested access not allowed.\n");
+                break;
+            case EAGAIN:
+                printf("Error: Not enough resources to map the object.\n");
+                break;
+            case EBADF:
+                printf("Error: Invalid file descriptor.\n");
+                break;
+            case EINVAL:
+                printf("Error: Invalid arguments or unsupported flags.\n");
+                break;
+            case ENFILE:
+                printf("Error: System limit on total number of open files reached.\n");
+                break;
+            case ENOMEM:
+                printf("Error: Not enough memory available to map.\n");
+                break;
+            case ENODEV:
+                printf("Error: No suitable device, for example trying to mmap a non-shared file.\n");
+                break;
+            case EPERM:
+                printf("Error: Operation not permitted.\n");
+                break;
+            case ETXTBSY:
+                printf("Error: Text file is busy.\n");
+                break;
+            default:
+                printf("Error: Unknown open failure, errno = %d\n", errno);
+                break;
+        }
+}
 
 int open_file(const char *filename, char **mmap_ptr, size_t size, size_t *bound){
     int fd = open(filename, O_RDONLY);
     if (fd == -1){
         printf("Error opening file\n");
+        print_open_error();
         return -1;
     }
     // mmap fails because the file is still being written to 
     size_t s = lseek(fd, 0, SEEK_END);
     *bound = s / size;
     if (*bound == 0){
+        if (errno == EOVERFLOW) {
+            printf("OVERFLOW\n");
+        }
+        if (errno == EIO) {
+            printf("IO\n");
+        }
+        if (errno == ENOSPC) {
+            printf("ENOSPC\n");
+        }
+        if (errno == EPERM) {
+            printf("PERM\n");
+        }
         printf("Error getting file size. Assuming its the same as the previous file..\n");
         if (global_stat_bound != 0) *bound = global_stat_bound;
         if (inst_stat_bound != 0) *bound = inst_stat_bound;
@@ -204,6 +374,9 @@ int open_file(const char *filename, char **mmap_ptr, size_t size, size_t *bound)
     *mmap_ptr = mmap(NULL, *bound * size, PROT_READ, MAP_PRIVATE, fd, 0); 
     if (*mmap_ptr == MAP_FAILED){
         printf("Error mapping file\n");
+        print_map_error();
+        // figure out reason
+
         return -1;
     }
     return fd;
@@ -223,19 +396,6 @@ struct run {
     FILE* aggregate_file;
     
 };
-
-#define SPLIT_STRUCT_STAT_FIELDS(struct_name, field_name, type) \
-    sprintf(filename, "%s_" #struct_name "_" #field_name "_%d.txt", destination_folder, run_number); \
-    file = fopen(filename, "w"); \
-    if (file == NULL){ \
-        printf("Error opening file\n"); \
-        return; \
-    }\
-    for (int i = 0; i < global_stat_bound; i++){ \
-        fwrite(&struct_name[i].field_name, sizeof(type), 1, file); \
-    }\
-    fclose(file);\
-    ;
 
 
 void split_structs_to_files(int run_number){
@@ -269,30 +429,33 @@ void split_structs_to_files(int run_number){
     SPLIT_STRUCT_STAT_FIELDS(global_stat, L3stalledCycles, uint64_t);
     SPLIT_STRUCT_STAT_FIELDS(global_stat, L3stalledCyclesDuringStore, uint64_t);
     SPLIT_STRUCT_STAT_FIELDS(global_stat, L3cyclesWithMemrequests, uint64_t);
-    ;
 
+    SPLIT_STRUCT_STAT_FIELDS(global_stat, totalL3MLPStalledCyclesSummed , uint64_t);
+    SPLIT_STRUCT_STAT_FIELDS(global_stat, totalL3StalledCyclesSummed , uint64_t);
+    SPLIT_STRUCT_STAT_FIELDS(global_stat, totalStalledCyclesSummed , uint64_t);
+    SPLIT_STRUCT_STAT_FIELDS(global_stat, totalMLPStalledCyclesSummed , uint64_t);
 
     //SPLIT_STRUCT_STAT_FIELDS(global_stat, loadCountByLatency, uint64_t);
-
     
     //SPLIT_GLOBAL_STAT_FIELDS(loadCountByLatency, uint64_t);
-    SPLIT_STRUCT_STAT_FIELDS(instruction_data, address, uint32_t   );
-    SPLIT_STRUCT_STAT_FIELDS(instruction_data, totalTime, uint64_t   );
-    SPLIT_STRUCT_STAT_FIELDS(instruction_data, stallTime, uint64_t   );
-    SPLIT_STRUCT_STAT_FIELDS(instruction_data, L3stallTime, uint64_t   );
+    SPLIT_STRUCT_STAT_FIELDS(instruction_data, address, uint64_t   );
+    SPLIT_STRUCT_STAT_FIELDS(instruction_data, totalTime, uint16_t   );
+    SPLIT_STRUCT_STAT_FIELDS(instruction_data, stallTime, uint16_t   );
+    SPLIT_STRUCT_STAT_FIELDS(instruction_data, L3stallTime, uint16_t   );
 
 
 
-    SPLIT_STRUCT_STAT_FIELDS(instruction_data, lastStallTime, uint64_t   );
+    SPLIT_STRUCT_STAT_FIELDS(instruction_data, lastStallTime, uint16_t   );
     SPLIT_STRUCT_STAT_FIELDS(instruction_data, stallCyclesMLPLoad, uint64_t   );
     SPLIT_STRUCT_STAT_FIELDS(instruction_data,  stallCyclesMLPStore, uint64_t   );
 
-    SPLIT_STRUCT_STAT_FIELDS(instruction_data, lastStallTime, uint64_t   );
+    SPLIT_STRUCT_STAT_FIELDS(instruction_data, lastStallTime, uint16_t   );
     SPLIT_STRUCT_STAT_FIELDS(instruction_data, L3stallCyclesMLPLoad, uint64_t   );
+
     //SPLIT_STRUCT_STAT_FIELDS(instruction_data,  L3stallCyclesMLPStore, uint64_t   );
 
     SPLIT_STRUCT_STAT_FIELDS(instruction_data, start_cycle, uint64_t   );
-    SPLIT_STRUCT_STAT_FIELDS(instruction_data, stallCyclesMLPBoth, uint32_t   );
+    SPLIT_STRUCT_STAT_FIELDS(instruction_data, stallCyclesMLPBoth, uint64_t   );
     SPLIT_STRUCT_STAT_FIELDS(instruction_data, MLP_store_at_start, uint8_t   );
     SPLIT_STRUCT_STAT_FIELDS(instruction_data, MLP_store_at_end, uint8_t   );
     SPLIT_STRUCT_STAT_FIELDS(instruction_data, MLP_load_at_start, uint8_t   );
@@ -304,6 +467,11 @@ void split_structs_to_files(int run_number){
     SPLIT_STRUCT_STAT_FIELDS(instruction_data, L3MLP_load_at_end, uint8_t   );
     SPLIT_STRUCT_STAT_FIELDS(instruction_data, L3MLP_store_at_middle, uint8_t   );
     SPLIT_STRUCT_STAT_FIELDS(instruction_data, L3MLP_load_at_middle, uint8_t   );
+    SPLIT_STRUCT_STAT_FIELDS(instruction_data, isMicroop, uint8_t   );
+    SPLIT_STRUCT_STAT_FIELDS(instruction_data, tlb_miss, uint8_t   );
+    SPLIT_STRUCT_STAT_FIELDS(instruction_data, isLoad, uint8_t   );
+    SPLIT_STRUCT_STAT_FIELDS(instruction_data, isStore, uint8_t   );
+
 
     
     
