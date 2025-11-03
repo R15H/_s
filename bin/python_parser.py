@@ -1,5 +1,360 @@
 from ctypes  import *
+import collections
 global_only = False
+success_run = 0
+MLP_PRECISION_FACTOR = 1024
+
+from scipy import stats
+
+def plot_r():
+    # real results of sy
+    folder="/mnt/nas/inesc/ist196723/latency_benchmark/tests_syn/plot_time_math"
+    #file="TIREDbig_final_results"
+    file="final_synthethic_tiering"
+
+    system = []
+    time = []
+    arand = []
+    aptr = []
+    ratio = []
+    with open(os.path.join(folder, file), 'r') as f:
+        lines = f.readlines()
+        sy_results = {}
+        for line in lines:
+            v = line.split(" ")
+            if len(v) < 6:
+                continue
+            system.append(v[-1])
+            time.append(float(v[0]))
+            arand.append(int(v[2]))
+            aptr.append(int(v[1]))
+            ratio.append(v[-2])
+    ratio = np.array(ratio)
+    arand = np.array(arand)
+    aptr = np.array(aptr)
+    time = np.array(time)
+    system = np.array(system)
+
+    for r in np.unique(ratio):
+        idx = ratio == r
+        plt.figure()
+        plt.title(f"Performance by ratio {r}")
+        plt.xlabel("Number of sequential reads")
+        plt.ylabel("Average execution time")
+        print(system[idx])
+        print(time[idx])
+        # one idx per aptr
+        # half index per system
+        aptrs = np.unique(aptr[idx])
+        idx_sort = np.argsort(aptrs)
+        #aptrs = np.sort(aptrs)
+
+        xticks = []
+        xticks_labels = []
+        for i in range(len(aptrs)):
+            current_aptr = aptrs[idx_sort][i]
+            
+            idx_mem = (aptr[idx] == current_aptr) & (system[idx] == "MEMTIS\n")
+            idx_asm = (aptr[idx] == current_aptr) & (system[idx] != "MEMTIS\n")
+            o = i*0.1
+
+            print("----------")
+            print(len(time[idx][idx_mem]))
+            print(len(time[idx][idx_asm]))
+            print("----------")
+            plt.bar(i+o, np.mean(time[idx][idx_mem]), width=0.5, color="blue")
+            plt.bar(i+o+0.5, np.mean(time[idx][idx_asm]), width=0.5, color="orange")
+            xticks.append(i+o+0.25)
+            xticks_labels.append(str(current_aptr))
+        plt.xticks(xticks, xticks_labels)
+            #plt.bar(i+0.25, 0, width=0, bottom=str(aptrs[i]))
+
+            #plt.bar(system[idx][i] + aptr[idx][i], time[idx][i], label="Time")
+            #plt.bar(system[idx][i], aptr[idx][i], bottom=time[idx][i], label="Ptr")
+
+        from matplotlib.lines import Line2D
+
+        # Color legend handles
+        color_handles = [
+            Line2D([0], [0],  color='blue', label='MEMTIS'),
+            Line2D([0], [0],  color='orange', label='AsMem'),
+        ]
+
+        # Combine marker and color handles
+        all_handles =  color_handles
+
+        # Show legend with all handles
+        plt.legend(handles=all_handles, loc='best')
+        plt.title(f"MEMTIS and AsMem performance with {r} higher sequential reads")
+        plt.savefig(f"{FIGS_FOLDER}/../report/ratio_{r}.png")
+    
+
+
+def plot_sy():
+    categories = ["All CXL", "Pessimal Static Allocation", "CXL DS", "Optimal Static Allocation", "All DRAM"]
+    values = [1.842, 1.719, 1.700, 1.006, 1.000 ]
+    plt.figure()
+    plt.title("Performance by static allocation")
+    plt.xlabel("Allocation mode")
+    plt.ylabel("Norm Perf")
+    plt.bar(categories, values)
+    plt.ylim(0.5,2)
+    plt.savefig(f"{FIGS_FOLDER}/../report/static_alloc_synth.png")
+
+    
+    fname="weights_over_time"
+    folder="/mnt/nas/inesc/ist196723/latency_benchmark/tests_syn/plot_time_math"
+    files={
+        "inst_weights": "inst_weights",
+        "acc_time_weights": "acc_time_weights",
+        "mlp_weight_weights": "mlp_weight_weights",
+        "stall_cycles_weights": "stall_weights",
+        "by_mlp_avg_weights": "by_mlp_avg_weights",
+        "arand" : "arand_",
+        "aptr" : "aptr_",
+    }
+    values = {}
+    for k,v in files.items():
+        values[k] = np.loadtxt(f"{folder}/{v}")
+        print(k, len(values[k]))
+
+    plt.figure()
+    plt.title("Instruction weights in function of inputs")
+    plt.xlabel("Number of sequential reads")
+    plt.ylabel("Weight")
+    insts_unique = np.unique(values['inst_weights'])
+
+    streams =  np.unique(values['arand'])
+    for o in [1]:
+        idx = values['arand'] > 0 #  s
+
+
+        mask_X = [inst == insts_unique[0] for inst in values['inst_weights'][idx]]
+        mask_O = [not cond for cond in mask_X]
+
+        plt.scatter(np.array(values['arand'])[idx][mask_X], np.array(values['acc_time_weights'])[idx][mask_X], 
+                    label='Access time Stream', marker='X', color="blue")
+        plt.scatter(np.array(values['arand'])[idx][mask_O], np.array(values['acc_time_weights'])[idx][mask_O], 
+                    label='Access time Pointer Chase', marker='o', color="blue")
+        
+        plt.scatter(np.array(values['arand'])[idx][mask_X], np.array(values['stall_cycles_weights'])[idx][mask_X], 
+                    label='Stall cycles Stream', marker='X', color="orange")
+        plt.scatter(np.array(values['arand'])[idx][mask_O], np.array(values['stall_cycles_weights'])[idx][mask_O], 
+                    label='Stall cycles Pointer Chase', marker='o', color="orange")
+        plt.scatter(np.array(values['arand'])[idx][mask_X], np.array(values['by_mlp_avg_weights'])[idx][mask_X], 
+                    label='Stall cycles/MLP Stream', marker='X', color="green")
+        plt.scatter(np.array(values['arand'])[idx][mask_O], np.array(values['by_mlp_avg_weights'])[idx][mask_O], 
+                    label='Stall cycles/MLP Pointer Chase', marker='o', color="green")
+        # marker legent
+        #plt.legend(handles=[Line2D([0], [0], marker='x', color='w', label='MU'), Line2D([0], [0], marker='o', color='w', label='inst')])
+
+        # make legend where color is associated with  the  Y value (the metric )and the marker  is associated with the instruction 
+        from matplotlib.lines import Line2D
+
+        marker_handles = [
+            Line2D([0], [0], marker='o', color='black', label='Pointer Chasing',
+                markerfacecolor='black', markersize=6, linestyle='None'),
+            Line2D([0], [0], marker='X', color='black', label='Streaming Read',
+                markerfacecolor='black', markersize=6, linestyle='None')
+        ]
+
+        # Color legend handles
+        color_handles = [
+            Line2D([0], [0], marker='o', color='blue', label='Access time',
+                markerfacecolor='blue', markersize=4, linestyle='None'),
+            Line2D([0], [0], marker='o', color='orange', label='Stall cycles',
+                markerfacecolor='orange', markersize=4, linestyle='None'),
+            Line2D([0], [0], marker='o', color='green', label='Stall cycles/MLP',
+                markerfacecolor='green', markersize=4, linestyle='None'),
+        ]
+
+        # Combine marker and color handles
+        all_handles = marker_handles + color_handles
+
+        # Show legend with all handles
+        plt.legend(handles=all_handles, loc='best', bbox_to_anchor=(1, 1))
+        # tight layout
+        plt.tight_layout()
+
+        # plt.legend()
+        s="1"
+        plt.savefig(f"{FIGS_FOLDER}/../report/{fname}_{s}.png")
+
+        
+        plt.figure()
+        plt.title("Weight proportion between Pointer Chase and Streaming Reads")
+        plt.bar("Access time", np.mean(values['acc_time_weights'][mask_O])/np.mean(values['acc_time_weights'][mask_X]), color="grey")
+        plt.bar("Stall cycles/MLP", np.mean(values['by_mlp_avg_weights'][mask_O])/np.mean(values['by_mlp_avg_weights'][mask_X]), color="grey")
+        plt.bar("Stall cycles", np.mean(values['stall_cycles_weights'][mask_O])/np.mean(values['stall_cycles_weights'][mask_X]), color="grey")
+        plt.bar("Iteration time", 13, color="grey")
+        plt.savefig(f"{FIGS_FOLDER}/../report/{fname}_proportion.png")
+
+
+    
+
+
+    
+
+
+def simple_weight():
+    def simp(data,r):
+        i = load_inst_fields(data, r)
+        # i80 = load_inst_fields(data, r, '80') <--- THIS WAS MAKING IT SKIP!
+        benchset = data[r]['0']['benchset']
+        print(benchset)
+        print('benchname', data[r]['0']['bench'].split("/")[-1], data[r]['0']['benchnr'])
+        print(benchset)
+        if "synth" not in benchset:
+            return
+        print("------------------")
+
+        print(len(i['address']))
+        print(len(i['stallCyclesMLPLoad']))
+        print(len(i['totalTime']))
+        print(len(i['stallTime']))
+        print("-----------stallCyclesMLPLoad -------")
+        print("------------------")
+        print("------------------")
+
+        sel = i['totalTime'] != 0
+        add = i['address'][sel]
+        uniq_add = np.sort(np.unique(add))
+        # <------------------------------------------- WAS SKIPPING BECAUSE OF PARTIAL ( the original constrains were alliviated for higher iteration time!)
+        j=0
+        #print("uniq insts", len(uniq_add))
+        #if len(uniq_add) > 50:
+        #return
+        header = (str(len(uniq_add+1)) + " ") * 10 + "\n"
+        out = header
+        ints_1 = []
+        ints_2 = []
+        inst_priority = []
+        import math 
+        for addr in uniq_add:
+            sel = i['address'] == addr 
+            j+=1
+            mlp_by_mean = int(np.mean(i['stallTime'][sel]/(i['average_mlp'][sel]+1)))
+            # int(np.mean(i['average_mlp'][sel])), "--->", 
+            out += str(addr) + " " + str(int(np.mean(i['totalTime'][sel]))) + " " + str(int(np.mean(i['stallTime'][sel]))) + " " + str(int(np.mean(i['stallCyclesMLPLoad'][sel])))  + " " + str(mlp_by_mean) + "\n"
+            mlp = int(np.mean(i['stallCyclesMLPLoad'][sel]))
+            ints_1.append(mlp_by_mean)
+            ints_2.append(int(mlp_by_mean/2))
+            if mlp >= 1: 
+                inst_priority.append(2**(int((mlp_by_mean)/(2))))
+
+            else:
+                inst_priority.append(mlp)
+
+        
+        bench = data[r]['0']['bench'].split("/")[-1]
+        with open(f"{FIGS_FOLDER}/maps/{benchset}-{bench}", "w") as f:
+            f.write(out)
+        if "syn" in benchset:
+            header = (str(3) + " ") * 10 
+            a = out.split("\n")
+            a.insert(1, "0 0 0 0 0 0 0")
+            a[0] = header
+            out = "\n".join(a)
+            with open(f"{FIGS_FOLDER}/maps/igstart-{benchset}-{bench}", "w") as f:
+                f.write(out)
+        return
+        
+        def do_compressed(values, uniq_insts):
+            diff = np.diff(np.array(values))
+            j = 0
+            out = header
+            for addr in uniq_insts:
+                sel = i['address'] == addr 
+                if diff[j] == 0:
+                    continue
+                out += str(addr) + " " + str(values[j]) + "\n"
+                j+=1
+            return out
+
+        with open(f"{FIGS_FOLDER}/maps_compressed_1/{bench}", "w") as f:
+            f.write(do_compressed(ints_1, uniq_add))
+        with open(f"{FIGS_FOLDER}/maps_compressed_2/{bench}", "w") as f:
+            f.write(do_compressed(ints_2, uniq_add))
+        with open(f"{FIGS_FOLDER}/compressed_3/{bench}", "w") as f:
+            f.write(do_compressed(inst_priority, uniq_add)) # keep same priority
+
+
+    iterate_over_benches(data, simp)
+
+def iterate_over_benches(data, function):
+    global bench_nr
+    global bench_name
+    
+    ok_runs = 0 
+    okay_names = []
+    bad_runs = 0
+    last_error = None
+    for r in data:
+        if '0' not in data[r].keys() or '80' not in data[r].keys(): # <---------
+            pass
+            #print("Skipped run", list(data[r].values())[0]['benchnr'])
+            #pass
+            #continue
+
+        try:
+            bench_nr = data[r]['0']['benchnr']
+            bench_name = data[r]['0']['bench'].split("/")[-1]
+        except:
+            print("Skipped run", list(data[r].values())[0]['benchnr'])
+            continue
+        try:
+            function(data, r)
+            ok_runs += 1
+            okay_names.append(bench_name)
+
+        except Exception as e:
+            bad_runs += 1
+            
+            if last_error and isinstance(e, type(last_error)):
+                print(f"ITERATE FAILED {str(e)} x {bad_runs}", end='\r')
+            else:
+                last_error = e
+                # print stack trace if its not FileNotFoundError
+                print(f"ITERATE FAILED {str(e)}", end='\r')
+                if not isinstance(e, FileNotFoundError):
+                    import traceback
+                    import sys
+                    exc_type, exc_value, exc_traceback = sys.exc_info()
+                    lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
+                    print(f'ITERATE_FAILED {"".join(lines)}')
+                else:
+                    print("ITERATE_FAILED Error", e)
+                print(f"---  {str(last_error)} x {bad_runs}", end='\r')
+                last_error = e
+            continue
+    print(f"ITERATE ENDED, ok runs: {ok_runs}, bad runs: {bad_runs}, total: {ok_runs+bad_runs}")
+    print('OKAY_NAMES', okay_names)
+
+def varity(data,r):
+    i = load_inst_fields(data, r)
+    ii = load_inst_fields(data, r, '80')
+
+
+    if(not np.all(i['stallTime'] < 1000 )):
+     failed_values = np.where(i['stallTime'] >= 1000)
+     print('ded', 'stallTime',data[r]['0']['bench'].split("/")[-1], data[r]['0']['benchnr'], len(i['stallTime'][failed_values]))
+
+
+    sel = i['L3MLP_load_at_middle'] != 0
+    if( not np.all(i['L3stallTime'][sel] < 1000)):
+     failed_values = np.where(i['L3stallTime'][sel] >= 1000)
+     print('ded', "stallTime",data[r]['0']['bench'].split("/")[-1], data[r]['0']['benchnr'], len(i['L3stallTime'][failed_values]))
+
+    if( not np.all(i['stallCyclesMLPLoad'] < 1000*64)):
+     failed_values = np.where(i['stallCyclesMLPLoad'] >= 1000*64)
+     print('ded', "stallCyclesMLPLoad",data[r]['0']['bench'].split("/")[-1], data[r]['0']['benchnr'], len(i['stallCyclesMLPLoad'][failed_values]))
+
+    if( not np.all(i['L3stallCyclesMLPLoad'][sel] < 1000*64)):
+     failed_values = np.where(i['L3stallCyclesMLPLoad'][sel] >= 1000*64)
+     print('ded',  "L3stallMLP", data[r]['0']['bench'].split("/")[-1], data[r]['0']['benchnr'], len(i['L3stallCyclesMLPLoad'][failed_values]))
+        
+
+
 
 runs_with_weird_stuff = 0
 import os 
@@ -14,11 +369,969 @@ RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/v3/results_gem5"
 FIGS_FOLDER="/mnt/nas/inesc/ist196723/osdi26/v3/final_data"
 
 FIGS_FOLDER="/mnt/nas/inesc/ist196723/osdi26/final_data"
+RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/sad_gem5/results_gem5"
 RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/results_gem5"
 
 
+# for obtaining a and b in soar
+RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/v4/results_gem5"
+#RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/v5MIRAGE/results_gem5"
+
+RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/results_gem5"
+
+
+import matplotlib.pyplot as plt
+
 from sklearn.preprocessing import StandardScaler
 from scipy.optimize import differential_evolution, minimize
+
+
+import numpy as np
+import os
+import glob
+
+all_slowdowns = np.zeros(10000)
+#all_costs = 
+
+#def get_all(data,r):
+
+
+vectors = {}
+def plot_my_soar():
+    global RUN_DATA_FOLDER
+    global run_meta
+    #RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/v5MIRAGE/results_gem5"
+    #run_meta=f"{RUN_DATA_FOLDER}/gem5_pids.txt"
+    print("plotting my soar")
+    data = load_bench_data()
+    
+    iterate_over_benches(data, my_soar)
+    print('Fitting...')
+    for key, lst in vectors.items():
+        if key == 'selections':
+            continue
+        try:
+            if key == 'actual_slowdown': 
+                continue
+            for i in range(len(lst)):
+                lst[i] =  np.array(lst[i])
+            #vectors[key] = np.array(vectors[key])
+        except Exception as e:
+            print(f"Failed to convert {key} to numpy array: {e}", vectors[key])
+            continue
+    for k in vectors:
+        plt.figure()
+        plt.title("Accumulated instruction costs by " + k)
+        plt.xlabel("Actual slowdown")
+        plt.ylabel("Accumulated instruction costs " + k)
+        #print(len(vectors['soar_slowdown']), len(vectors['soarMetric']), len(vectors['soarMetric5050']), len(vectors['soarMetric8020']), len(vectors['soarMetric2080']))
+        from scipy.stats.mstats import winsorize
+        #vectors['actual_slowdown'] = winsorize(vectors['actual_slowdown'], limits=[0.01, 0.01])
+        
+
+        vu = vectors[k]
+        vu = winsorize(np.array(vectors[k]), limits=[0.01, 0.01])
+        plt.scatter(vectors['soar_slowdown'], vu, s=2, alpha=0.3, color='blue')
+        #plt.scatter(vectors['soar_slowdown'], vectors['soarMetric5050'], s=2, alpha=0.3, color='green')
+        #plt.scatter(vectors['soar_slowdown'], vectors['soarMetric8020'], s=2, alpha=0.3, color='red')
+        #plt.scatter(vectors['soar_slowdown'], vectors['soarMetric2080'], s=2, alpha=0.3, color='yellow')
+        plt.savefig(f"{FIGS_FOLDER}/new_gen/soar_inst_vs_soar_all_{k}.png")
+        plt.close()
+
+
+    exit(0)
+    
+    plot_soar_results('all')
+    
+def plot_soar_results(bench):
+    #0.148, 0.146 
+    # 38% error..
+    vectors['actual_slowdown'] = np.array(vectors['actual_slowdown'])
+    for mlp in ['L3MLP_load_at_middle', 'L3MLP_load_at_start', 'L3MLP_load_at_end']:
+        fitted, a, b, rmse = obtain_soar_inst(vectors['selections'], vectors[mlp], vectors['L3stallTime'],vectors['totalTime'], vectors['actual_slowdown'])
+        print("A,B",a,b)
+        from scipy.stats.mstats import winsorize
+        #vectors['actual_slowdown'] = winsorize(vectors['actual_slowdown'], limits=[0.01, 0.01])
+        #vectors['L3stallTime'] = winsorize([ np.array(n) for n in vectors['L3stallTime']], limits=[0.01, 0.01])
+        plt.figure()
+        plt.title(f"Accumulated instruction costs by w/Soar ({mlp})")
+        plt.xlabel("Actual slowdown")
+        plt.ylabel("Accumulated instruction costs")
+        # (fitted*np.array([ np.sum(n) for n in vectors['L3stallTime']]))/vectors['fast_cycles'],
+        plt.scatter(vectors['actual_slowdown'], fitted, s=2, alpha=0.3)
+        ax2 = plt.twinx()
+        ax2.scatter(vectors['actual_slowdown'], vectors['diff_stalls'], s=2, alpha=0.3, color='red')
+        plt.savefig(f"{FIGS_FOLDER}/new_gen/v5NICE_{rmse}_{bench}_{mlp}.png")
+        plt.close()
+    #soar_metric = i['stallTime'][sel] /  ( i['L3MLP_load_at_middle'][sel] * b  + a * i['totalTime'][sel] ) 
+    #total_cost = np.sum(soar_metric)
+
+def my_soar(data,r):   # CHANGE TO NP MEAN
+    i = load_inst_fields(data, r)
+    g0 = load_global_fields(data, r)
+    using_real_slow = False
+    try:
+        print(g0['currentCycle'])
+    except:
+        bench = data[r]['0']['bench'].split("/")[-1]
+        print(bench, "has no cycle'?")
+        raise Exception("has no cycle!")
+    
+    if using_real_slow:
+        last_idx = get_last_idx_of_smallest_vector(g80['currentCycle'],g0['currentCycle'])
+        i80 = load_inst_fields(data, r, '80')
+        g80 = load_global_fields(data, r, '80')
+        i80 = load_inst_fields(data,r, "80")
+    else:
+        last_idx = len( g0['currentCycle'])-1
+    print("LLLLLLLLLLLLLLAST", last_idx)
+    #if len(g80['currentCycle']) < 500  or len(g0['currentCycle']) <500 :
+    i = load_inst_fields(data, r)
+    SKIP_START = 1000
+    MAX_ITER=10000
+    if last_idx < SKIP_START:
+        return
+    if last_idx > MAX_ITER:
+        step = int(last_idx/MAX_ITER)
+    else:
+        step = 1
+    print(step)
+    if(last_idx == 0):
+        return
+    
+    print("RUN", last_idx, step)
+    for cycle_nr in range(SKIP_START,last_idx,step): # ignore the first
+        #print("cycooooo")
+        #print(cycle_nr, step, last_idx, "OOOO")
+        current_cycle = g0['currentCycle'][cycle_nr] 
+        previous_cycle = g0['currentCycle'][cycle_nr-1]
+        #print("triiiilii")
+        WINDOW = 0
+        next_cycle = g0['currentCycle'][cycle_nr+WINDOW]
+        mlp = 'average_mlp' # 'L3MLP_load_at_middle'
+        sel = (i[mlp] > 0) & (i['start_cycle'] < current_cycle) & (previous_cycle < i['start_cycle']) & (i['totalTime'] > 60)
+        #for k in [ 'totalMLPStalledCyclesSummed', 'totalMLPStalledCycles_D_TimeSummed']: #,'totalMLPStalledCycles_D_TimeSummed', 'totalMLPStalledCyclesSummed', 'totalMLPStalledCyclesSummed']:
+        if np.sum(sel)  < 5:
+            #print(np.sum(sel), "SUMMM")
+            continue
+            pass
+            #continue
+        #print("triiiilii")
+        vectors.setdefault('MLPstallTime', []).append(np.sum(i['stallCyclesMLPLoad'][sel]))               # CHANGE TO NP MEAN
+        if using_real_slow:
+            sel80 = (i80[mlp] > 0) & (i80['start_cycle'] < current_cycle) & (previous_cycle < i80['start_cycle']) & (i80['totalTime'] > 60)
+            diff = np.sum(np.subtract(np.sum(i80['L3stallTime'][sel80]) , np.sum(i['L3stallTime'][sel]) ,dtype=np.int64 ))
+        #diff = np.sum((i['L3stallTime'][sel]))
+        #diff = np.sum(sel)
+        #print("LEN OF SEL", np.sum(sel), data[r]['0']['bench'].split("/")[-1])
+            actual_slowdown = (np.subtract(g80['currentCycle'][cycle_nr+WINDOW] , g0['currentCycle'][cycle_nr+WINDOW], dtype=np.int64)) # /g0['currentCycle'][cycle_nr]
+        #print("triiiilii")
+        fast_cycles = g0['currentCycle'][cycle_nr]
+        #print("trololo")
+
+        aol = g0['cyclesWithMemrequests'][cycle_nr]/g0['commitedLoads'][cycle_nr] 
+        aol = np.where(g0['commitedLoads'][cycle_nr] == 0, 0, aol) 
+        #aol = g0['stalledCycles'][cycle_nr]/g0['currentCycle'][cycle_nr]
+        a = 1.0155768028621026
+        b = -0.2562029379967975
+        soar_slowdown =  (g0['stalledCycles'][cycle_nr]/g0['currentCycle'][cycle_nr]) * 1/(a + b/aol)
+        vectors.setdefault('soar_slowdown', []).append(soar_slowdown)
+        t = i['totalTime'][sel]
+        vectors.setdefault('totalTime', []).append(np.sum(t))               # CHANGE TO NP MEAN
+        s = i['stallTime'][sel]
+        vectors.setdefault('stallTime', []).append(np.sum(s))
+        m =  s/( i['average_mlp'][sel] * b  + a * t ) 
+        vectors.setdefault('soarMetric', []).append((np.sum(m)))
+        m = s/( i['average_mlp'][sel] * 0.5  + 0.5 * t ) 
+        vectors.setdefault('soarMetric5050', []).append((np.sum(m)))
+        m = s/( i['average_mlp'][sel] * 0.8  + 0.2 * t ) 
+        vectors.setdefault('soarMetric8020', []).append((np.sum(m)))
+        m = s/( i['average_mlp'][sel] * 0.2  + 0.8 * t ) 
+        vectors.setdefault('soarMetric2080', []).append((np.sum(m)))
+        m = s/( i['average_mlp'][sel] * 0  + 1 * t ) 
+
+        vectors.setdefault('soarMetric01', []).append((np.sum(m)))
+        m = s/( i['average_mlp'][sel] * 1  + 0 * t ) 
+        vectors.setdefault('soarMetric10', []).append((np.sum(m)))
+
+        vectors.setdefault('percentage total time', []).append((np.sum(i['stallTime'][sel]/i['totalTime'][sel])))
+        #vectors.setdefault('totalMLPStalledCyclesSummed', []).append((g0['totalStalledCyclesSummed']))
+        #vectors.setdefault('totalMLPStalledCycles_D_TimeSummed', []).append((g0['totalMLPStalledCycles_D_TimeSummed']))
+        #vectors.setdefault('totalMLPStalledCyclesSummed', []).append((g0['totalMLPStalledCyclesSummed']))
+        
+
+        
+        #vectors.setdefault('stalledCycles', []).append(np.mean(i['stalledCycles'][sel]))
+
+
+        ##vectors.setdefault('actual_slowdown', []).append(actual_slowdown)
+        #for mlp in ['L3MLP_load_at_middle', 'L3MLP_load_at_start', 'L3MLP_load_at_end']:
+        #vectors.setdefault(mlp, []).append(i[mlp][sel])
+				
+        #vectors.setdefault('diff_stalls', []).append(diff)
+        #vectors.setdefault('L3stallTime', []).append(np.sum(i['L3stallTime'][sel]))
+        #vectors.setdefault('selections', []).append(sel)
+        #vectors.setdefault('soarMetric2080', []).append((np.sum(m)))
+        #vectors.setdefault('totalMLPStalledCyclesSummed', []).append((g0['totalStalledCyclesSummed'][cycle_nr]))
+        #vectors.setdefault('totalMLPStalledCycles_D_TimeSummed', []).append((g0['totalMLPStalledCycles_D_TimeSummed'][cycle_nr]))
+        #vectors.setdefault('totalMLPStalledCyclesSummed', []).append((g0['totalMLPStalledCyclesSummed'][cycle_nr]))
+    		
+
+def my_soar_aggregate(data, r):
+    """
+    Similar to my_soar but uses aggregate metrics instead of per-instruction data.
+    
+    Key differences from my_soar:
+    - Uses load_aggregate_fields() instead of load_inst_fields()
+    - Works with aggregated instruction statistics (count-weighted metrics)
+    - Computes weighted averages for MLP metrics instead of per-instruction values
+    - Stores results with 'agg_' prefix to distinguish from instruction-level data
+    - More memory efficient for large datasets with many instructions
+    
+    Analyzes performance using aggregated statistics over time windows to correlate
+    slowdown with aggregate stall times and MLP characteristics.
+    """
+    # Load aggregate data for both tiers
+    ag0 = load_aggregate_fields(data, r, '0')
+    ag80 = load_aggregate_fields(data, r, '80')
+    
+    # Load global fields for cycle information
+    g0 = load_global_fields(data, r)
+    g80 = load_global_fields(data, r, '80')
+    
+    last_idx = get_last_idx_of_smallest_vector(g80['currentCycle'], g0['currentCycle'])
+    
+    for cycle_nr in range(1, last_idx):  # ignore the first
+        current_cycle = g0['currentCycle'][cycle_nr]
+        previous_cycle = g0['currentCycle'][cycle_nr-1]
+        WINDOW = 0
+        
+        # Filter aggregate data for instructions with L3 MLP and sufficient execution time
+        # Using aggregate fields: count, L3MLP_load_at_middle, totalTime, etc.
+        sel = (ag0['L3MLP_load_at_middle'] > 0) & (ag0['count'] > 0) & (ag0['totalTime'] > 60)
+        
+        # Calculate aggregate metrics
+        selected_count = np.sum(ag0['count'][sel])
+        
+        if selected_count < 20:
+            continue
+            
+        print("AGGREGATE COUNT", selected_count, data[r]['0']['bench'].split("/")[-1])
+        
+        # Calculate actual slowdown between tiers
+        actual_slowdown = np.subtract(g80['currentCycle'][cycle_nr+WINDOW], 
+                                     g0['currentCycle'][cycle_nr+WINDOW], 
+                                     dtype=np.int64)
+        
+        # Aggregate stall time difference
+        agg_stall_diff = np.sum(ag80['L3stallTime'][sel] * ag80['count'][sel]) - \
+                         np.sum(ag0['L3stallTime'][sel] * ag0['count'][sel])
+        
+        fast_cycles = g0['currentCycle'][cycle_nr]
+        
+        # Store aggregate metrics
+        vectors.setdefault('fast_cycles', []).append(fast_cycles)
+        vectors.setdefault('actual_slowdown', []).append(actual_slowdown)
+        
+        # Store aggregate MLP metrics (weighted by count)
+        for mlp in ['L3MLP_load_at_middle', 'L3MLP_load_at_end', 'MLP_load_at_end']:
+            if mlp in aggregate_types:
+                weighted_mlp = np.sum(ag0[mlp][sel] * ag0['count'][sel]) / selected_count if selected_count > 0 else 0
+                vectors.setdefault(f'agg_{mlp}', []).append(weighted_mlp)
+        
+        # Store aggregate stall and time metrics
+        vectors.setdefault('agg_diff_stalls', []).append(agg_stall_diff)
+        vectors.setdefault('agg_totalTime', []).append(np.sum(ag0['totalTime'][sel] * ag0['count'][sel]))
+        vectors.setdefault('agg_L3stallTime', []).append(np.sum(ag0['L3stallTime'][sel] * ag0['count'][sel]))
+        vectors.setdefault('agg_stallTime', []).append(np.sum(ag0['stallTime'][sel] * ag0['count'][sel]))
+        vectors.setdefault('agg_count', []).append(selected_count)
+
+def plot_my_soar_aggregate():
+    """
+    Plot aggregate SOAR results using aggregate metrics.
+    """
+    print("plotting my soar aggregate")
+    iterate_over_benches(data, my_soar_aggregate)
+    print('Converting aggregate data...')
+    
+    # Convert aggregate vectors to numpy arrays
+    vectors['actual_slowdown'] = np.array(vectors['actual_slowdown'])
+    for key in ['agg_diff_stalls', 'agg_totalTime', 'agg_L3stallTime', 'agg_stallTime', 'agg_count', 'fast_cycles']:
+        if key in vectors:
+            vectors[key] = np.array(vectors[key])
+    
+    # Convert MLP aggregate vectors
+    for mlp in ['L3MLP_load_at_middle', 'L3MLP_load_at_end', 'MLP_load_at_end']:
+        agg_key = f'agg_{mlp}'
+        if agg_key in vectors:
+            vectors[agg_key] = np.array(vectors[agg_key])
+    
+    # Plot aggregate results
+    plt.figure(figsize=(10, 6))
+    plt.title("Aggregate Slowdown vs Stall Time")
+    plt.xlabel("Actual slowdown (cycles)")
+    plt.ylabel("Aggregate L3 Stall Time")
+    plt.scatter(vectors['actual_slowdown'], vectors['agg_L3stallTime'], s=2, alpha=0.3)
+    plt.savefig(f"{FIGS_FOLDER}/new_gen/AGGREGATE_slowdown_vs_stalls.png")
+    plt.close()
+    
+    # Plot aggregate MLP metrics
+    for mlp in ['L3MLP_load_at_middle', 'L3MLP_load_at_end', 'MLP_load_at_end']:
+        agg_key = f'agg_{mlp}'
+        if agg_key not in vectors:
+            continue
+            
+        plt.figure(figsize=(10, 6))
+        plt.title(f"Aggregate {mlp} vs Slowdown")
+        plt.xlabel("Actual slowdown (cycles)")
+        plt.ylabel(f"Weighted Average {mlp}")
+        plt.scatter(vectors['actual_slowdown'], vectors[agg_key], s=2, alpha=0.3, label=mlp)
+        
+        # Add secondary axis for stall difference
+        ax2 = plt.twinx()
+        ax2.scatter(vectors['actual_slowdown'], vectors['agg_diff_stalls'], s=2, alpha=0.3, color='red', label='Stall Diff')
+        ax2.set_ylabel("Aggregate Stall Difference", color='red')
+        
+        plt.legend(loc='upper left')
+        ax2.legend(loc='upper right')
+        plt.savefig(f"{FIGS_FOLDER}/new_gen/AGGREGATE_{mlp}.png")
+        plt.close()
+    
+    print(f"Aggregate analysis complete. Processed {len(vectors['actual_slowdown'])} data points.")
+
+def conv():
+            for key, lst in vectors.items():
+                if key == 'selections':
+                    continue
+                try:
+                    if key == 'actual_slowdown': 
+                        continue
+                    for i in range(len(lst)):
+                        lst[i] =  np.array(lst[i])
+                    #vectors[key] = np.array(vectors[key])
+                except Exception as e:
+                    print(f"Failed to convert {key} to numpy array: {e}", vectors[key])
+                    continue
+
+
+def single_my_soar(data,r):
+    global vectors
+    vectors = {}
+    bench_name = data[r]['0']['bench'].split("/")[-1]
+    bench_nr = data[r]['0']['benchnr']
+    my_soar(data,r)
+    conv()
+    plot_soar_results(f'FINAL_{bench_name}_{bench_nr}')
+    
+    
+def iter_single_my_soar():
+    global RUN_DATA_FOLDER
+    global run_meta
+    RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/results_gem5"
+    run_meta=f"{RUN_DATA_FOLDER}/gem5_pids.txt"
+    data = load_bench_data()
+    iterate_over_benches(data, single_my_soar)
+
+
+def plot_sampling_cost():
+    d = {
+        # 839234342140 <------------ tsc
+        # total SAMns 839234342140 10282 <- why total time so small???
+
+        # 1490523994 totalSAMns 839234342140   
+        'MEMTIS (no CPU cap)' :            [      1291106, ],# 363012000               2509685216000
+        # 825483551488 total CPUns
+
+        
+        #   1030150904 
+        # 837137431530
+
+        # 1030150904 totalSAMns 837137431530      <-- 
+        # 837137431530 894033138
+        'MEMTIS (default CPU cap)' :            [ 1287857], #  366640000    cpu usage  4160968320000
+        # 1428674964 total CPUns
+
+        
+
+        # 2167801116 837793533518   <-- time processing vs time exec
+
+        # totalSAMns 837793533518 21667
+        'AsMem - Compressed Array (no CPU cap)': [1324427] ,  #                         158017923200                      #  833010627020
+        # 833010627020 total CPUns
+        'AsMem - Hashtable (no CPU cap)': 1
+    }
+
+    samples_per_cycle = {
+           'MEMTIS (no CPU cap)' :            [   1030150904/1232484    ],# 363012000               2509685216000
+        'MEMTIS (default CPU cap)' :            [ 1490523994/1014182 ], #  366640000    cpu usage  4160968320000
+        'AsMem - Compressed Array (no CPU cap)': [2167801116/875723 ] ,  #                         158017923200                      #  833010627020
+        'AsMem - Hashtable (no CPU cap)': [       2028373070/862294]
+        
+        
+        
+    }
+    sample_ratio = {
+
+        # 902172825 total runtime  of others
+                                                  
+        'MEMTIS (no CPU cap)' :            [       1014182, ],# 363012000               2509685216000
+        'MEMTIS (default CPU cap)' :            [  1232484], #  366640000    cpu usage  4160968320000
+        'AsMem - Compressed Array (no CPU cap)': [          875723] ,  #                         158017923200                      #  833010627020
+        'AsMem - Hashtable (no CPU cap)': [         37829,  862294] #  total spend computing  2028373070
+
+        # u64                                               922793 1318656
+        #total all 839938150430
+        # 1000000000000 # execution time  of hashtable
+        #   sample        total 
+        #  3432718152 843376061096
+        
+    }
+    
+
+    normalized = {}
+    for k in d:
+        normalized[k]   = d[k]/d['MEMTIS (no CPU cap)']
+    
+    plt.figure()
+    plt.title("Number of Samples Processed")
+    plt.xlabel("Tiering System")
+    plt.ylabel("Number of Samples Processed")
+    d = sample_ratio
+    plt.bar(range(len(d)), list(d.values()))
+    plt.xticks(range(len(d)), list(d.keys()))
+    plt.savefig(f"{FIGS_FOLDER}/real_data/systems/sampling_cost.png")
+    plt.close()
+
+    plt.figure()
+    plt.title("Number of Samples Processed")
+    plt.xlabel("Tiering System")
+    plt.ylabel("Number of Samples Processed")
+    d = sample_ratio
+    plt.bar(range(len(d)), list(d.values()))
+    plt.xticks(range(len(d)), list(d.keys()))
+    plt.savefig(f"{FIGS_FOLDER}/real_data/systems/sampling_cost.png")
+    plt.close()
+    
+
+
+def plot_hit_ratio():
+    folder=f"{NAS}/osdi26/real_data/clean_try/real_data/batch"
+    runs = glob.glob(f"{folder}/mcf_s_*2000-*")
+
+
+    for run in sorted(runs):
+        stats=folder +"/"+"STATS-" + os.path.basename(run)
+        log_file = stats 
+        cmd = f"awk '/dram_hits/ {{print $7}}' {log_file}"
+        print(cmd)
+        with os.popen(cmd) as pipe:
+            raw_text = pipe.read()
+            #print(raw_text)
+            #continue
+            dram_text = raw_text
+
+            try:
+                pass
+               # dram_hits = int(raw_text.split("\n")[0]) #np.loadtxt(pipe, dtype=int)
+            except:
+                print('error', raw_text)
+                continue
+            #print(dram_hits)
+        cmd = f"awk '/dram_hits/ {{print $12}}' {log_file}"
+        with os.popen(cmd) as pipe:
+            raw_text = pipe.read()
+            slow_text = raw_text
+            try:
+                #slow_hits = int(raw_text.split("\n")[0]) #np.loadtxt(pipe, dtype=int)
+                pass
+            except:
+                print('error', raw_text)
+                continue
+            #print(slow_hits)
+        print("-->",dram_text, slow_text, "<---")
+        continue
+        if slow_hits == 0:
+            continue
+        nat_run[run] = dram_hits/slow_hits # hit ratio
+
+        print(f"HIT RATIO {run}: {dram_hits/slow_hits}")
+
+    plt.figure(figsize=(50,10))
+    plt.title("Hit Ratio")
+    plt.xlabel("Run")
+    plt.ylabel("Hit Ratio")
+    plt.bar(range(len(nat_run)), list(nat_run.values()))
+    plt.xticks(range(len(nat_run)), list(nat_run.keys()))
+    plt.savefig(f"{FIGS_FOLDER}/real_data/systems/hit_ratio.png")
+    plt.close()
+    exit(0)
+
+#plot_hit_ratio()
+#exit(0)
+    
+def get_cdf_array(data, normalizeByTotal=False):
+                sorted_data = np.sort(data)
+                n = len(sorted_data)
+                if normalizeByTotal:
+                    cdf = np.cumsum(sorted_data)
+                    cdf = cdf/ np.sum(sorted_data)
+                    # replace NaNs with 0
+                    cdf = np.nan_to_num(cdf)
+                else:
+                    cdf = np.arange(1, n+1) / n
+                return sorted_data, cdf #migrations_cdf
+human = collections.defaultdict(lambda: lambda x: x, {
+    'stallTime': 'Stall cycles',
+    'mcf' : 'Speccpu\'s  605.mcf_s',
+})
+def get_bname(data,r):
+    return data[r]['0']['bench'].split('/')[-1]
+def get_bnr(data,r):
+    return data[r]['0']['benchnr']
+def do_cdf_of_instructions(data,r):
+    ag = load_aggregate_fields(data,r)
+    inst_values = [] # total
+    inst_avg_metric = [] # avg
+    metric = 'stallTime'
+    total_samples = ag['count'].sum()
+    total_stall_time = np.sum(ag[metric]*ag['count'])
+    uniq_insts = np.unique(ag['address'])
+    inst_both = []
+    for n in uniq_insts:
+        mask = (ag['address'] == n) & (ag['count'] > 0) ###################### REMOVE STORES! 
+        inst_value = np.sum(ag[metric][mask] * ag['count'][mask]) 
+        avg = np.sum(ag[metric][mask]) /np.sum( ag['count'][mask]) 
+        inst_avg_metric.append(avg)
+        inst_values.append(inst_value)
+        inst_both.append((inst_value, avg))
+
+    mask = (ag['address'] > 0) & (ag['count'] > 0) ###################### REMOVE STORES! 
+    mask_greater_than_2000 = (ag[metric][mask]/ag['count'][mask]) > 2000
+    stall_time_greater_than_2000 = np.sum(mask_greater_than_2000)
+    #print(f"Number of times stall time is greater than 2000 in {get_bname(data,r)}_{get_bnr(data,r)}: {stall_time_greater_than_2000}")
+    if stall_time_greater_than_2000:
+        print(f"WARNING: {get_bname(data,r)}_{get_bnr(data,r)} has stall times greater than 2000 ({stall_time_greater_than_2000} times). Its average of ", np.mean(ag[metric][mask]/ag['count'][mask]))
+
+    #print(inst_values)
+    #bandwidth_sorted = np.sort(inst_values)
+    #n = len(bandwidth_sorted)
+    #migrations_cdf = np.cumsum(bandwidth_sorted) / total_stall_time
+
+    x, contrib_total_lat = get_cdf_array(inst_values, normalizeByTotal=True)
+
+    sorted_data = sorted(inst_both, key=lambda x: x[1])
+    n = len(sorted_data)
+    #if normalizeByTotal:
+    cdf = np.cumsum([ x[0] for x in sorted_data])
+    cdf = cdf/ np.sum([ x[0] for x in sorted_data])
+    # replace NaNs with 0
+    #cdf = np.nan_to_num(cdf)
+    #cdf = np.arange(1, n+1) / n
+    #x, contrib_total_lat = get_cdf_array(ag[metric], normalizeByTotal=True)
+    # most of the latency comes from what nr of stall cycles??
+    plt.figure()
+    plt.title("CDF of Instructions")
+    plt.xlabel(human[metric])
+    plt.ylabel("CDF")
+    plt.plot([ x[1] for x in sorted_data], cdf ) # x[0] for x in sorted_data])
+    #plt.plot(inst_avg_metric,contrib_total_lat)
+    plt.savefig(f"{FIGS_FOLDER}/gen/insts/cdf/{get_bname(data,r)}_{get_bnr(data,r)}.png")
+    plt.close()
+
+
+def non_l3_inst(i, inverse=False):
+    if inverse: 
+        return (i['L3MLP_load_at_middle'] != 0)  | (i['L3MLP_load_at_middle'] != 0)
+    return (i['L3MLP_load_at_middle'] == 0)  & (i['L3MLP_load_at_middle'] == 0)
+    
+found_synthetics = 1000
+def do_cdf_mlp(data, r):
+    # plot
+    i = load_inst_fields(data, r)
+    i80 = load_inst_fields(data, r, '80')
+    # Is there a difference between the MLP found in higher latency memory devices? (likely to increase!)
+    # Is there a stop/start behaviour? 
+    #       single access pattern i.e. a low MLP request, then MLP keeps increasing and stabilizes
+    #       combined patterns i.e. ?
+
+    # color under the line is the 
+    all_mlp_fields = ['MLP_store_at_start', 
+                     'MLP_store_at_start', 
+                     'MLP_load_at_start',
+                     'MLP_load_at_end',
+
+    ]
+    hit_selector = non_l3_inst(i) 
+    l3_selector = non_l3_inst(i, inverse=True)  
+    l3_mlp_fields = [
+                     'L3MLP_load_at_middle',
+                     'L3MLP_store_at_start',
+                     'L3MLP_load_at_start',
+                     'L3MLP_store_at_middle',
+                     ]
+    
+    #fig, axs = plt.subplots(6, 6, figsize=(15, 15))
+    iii=0
+    fig, axs = plt.subplots(3, 3, figsize=(15, 15))
+    axes = axs.flat
+    for fields, tier_sel,tier_name in ((all_mlp_fields,hit_selector, 'Hits'), (l3_mlp_fields, l3_selector ,'LLC misses'), 
+                                         (l3_mlp_fields+ all_mlp_fields, l3_selector | hit_selector, "All" ) 
+                                       ):
+                                    
+        for atype_sel, access_type  in ((i['isLoad'] == 0, 'Store'), (i['isLoad'] == 1, 'Load'), (( ( i['isLoad'] == 0) | (i['isLoad'] ==1))  , 'ALL ALL')):
+            # pass 
+            sel = np.intersect1d(np.where(tier_sel),np.where(atype_sel))
+            #plt.figure()
+            for f in fields:
+                d = i[f][sel]
+                # normalize by the total MLP or the nr of data points (total MLP does not make sense. aggregate only for stall cycles for instance)
+                x,y = get_cdf_array(d, normalizeByTotal=False)
+                
+                field_type = " ".join(f.split("_")[1:])
+                line_style  = "--" if "L3" in f else "-"
+                #do a different line type according to weather the field has L3 on its name or not, have the same color for each field that has the sample 
+                axes[iii].plot(x,y, label=field_type, linestyle=line_style)
+                ##jjif any(fld in field.split("_") if fld == "L3"):
+                #el#jse:
+                #    plt.plot(x,y, label=f, linestyle='-')
+            #plt.xlim(0, 4.0)
+            #plt.ylim(0, 1.0)
+            #plt.plot(migrations_cdf,bandwidth_sorted, label="CDF")
+            #bench = data[r]['0']['bench'].split("/")[-1]
+            #print(data[r])
+            bench = data[r]['0']['bench'].split("/")[-1]
+            benchnr = data[r]['0']['benchnr']
+            axes[iii].set_title("CDF of MLP for " + bench )
+            axes[iii].legend()
+            if "synth" in bench:
+                found_synthetics += 1
+
+            axes[iii].set_ylabel("CDF")
+            axes[iii].set_xlabel("MLP")
+            iii+=1
+    os.makedirs(f"{FIGS_FOLDER}/gen/benchmarks/_MLP_CDFS/{bench}", exist_ok=True)
+    pid = data[r]['0']['pid']
+    plt.savefig(f"{FIGS_FOLDER}/gen/benchmarks/_MLP_CDFS/{bench}/_mlp_cdf_{benchnr}.png")
+    plt.close()
+            
+
+
+
+    
+def plot_migrations_overtime():
+
+    folder=f"{NAS}/osdi26/real_data/clean_try/real_data/batch"
+
+    runs = glob.glob(f"{folder}/mcf**MEMTIS*")
+    bench = "mcf"
+    normal= folder+"/mcf_s_base.NOavxprota-m64-MEMTIS-NORMAL-2000-1759761341"
+    mais_mais = folder+"/mcf_s_base.NOavxprota-m64-MEMTIS-MAIS_MAIS-3--2000-1759778315"
+
+    print(len(runs), "dead runs")
+    def get_mig_data(run):
+        stats=folder +"/"+"STATS-" + os.path.basename(run)
+        #stats=folder+"/"+"STATS-" + run
+        log_file = stats 
+        cmd = f"awk '/pgmigrate_success/ {{print $NF}}' {log_file}"
+        with os.popen(cmd) as pipe:
+            migrations = np.loadtxt(pipe, dtype=int)
+        migrations -= migrations[0]
+        t = np.arange(0, len(migrations) * 250, 250)
+        return t, migrations
+
+    t_normal, migrations_normal = get_mig_data(normal)
+    t_mais_mais, migrations_mais_mais = get_mig_data(mais_mais)
+    print(migrations_normal[-1],"n")
+    print(migrations_mais_mais[-1],"n")
+
+    #migrations_cdf_extended = np.append(migrations_cdf, 1.0)  # 100% of data below 4 GB/s
+    page_size = 4096
+    plt.figure(figsize=(10,10))
+
+    for (migrations,name) in [(migrations_normal,"Memtis"), (migrations_mais_mais,"AsMem")]:
+        bandwidth = np.diff(migrations)*page_size/250/(1024*1024)
+        bandwidth_sorted = np.sort(bandwidth)
+        n = len(bandwidth_sorted)
+        cdf = np.arange(1, n+1) / n
+        migrations_cdf = np.cumsum(bandwidth_sorted)/cdf
+        plt.plot(bandwidth_sorted,migrations_cdf, label=name)
+        break
+    plt.xlim(0, 4.0)
+    plt.ylim(0, 1.0)
+    #plt.plot(migrations_cdf,bandwidth_sorted, label="CDF")
+    plt.title("CDF of migrations bandwidth for " + bench )
+    plt.ylabel("CDF")
+    plt.xlabel("Bandwidth (GB/s)")
+    plt.savefig(f"{FIGS_FOLDER}/real_data/" + "combined_bw_cdf.png")
+    plt.close()
+    #exit(0)
+    #return
+
+    def plot_migrations_over_timeeee(t, migrations, title, name):
+        color = "blue" if "NORMAL" in run else "orange"
+        plt.plot(t, migrations, label="Migrations per 250ms", c=color)
+        plt.xlabel("Time (ms)")
+        plt.ylabel("Total pages migrated")
+        plt.title(title)
+        #plt.ylim(0, 5e7)
+
+    plt.figure(figsize=(10,10))
+    for run in sorted(runs):
+        try:
+            t, migrations = get_mig_data(run)
+            name = os.path.basename(run)
+            if name == normal:
+                name = "Memtis"
+                print("found memtis")
+            elif name == mais_mais:
+                name = "AsMem"
+                print("found asmem")
+            else:
+                pass
+                #continue
+            if migrations[-1] < 100:
+                continue
+            plot_migrations_over_timeeee(t, migrations, "Migrations over time for 605.mcf_s", "l")
+            continue
+            
+            page_size = 4096
+            bandwidth = np.diff(migrations)*page_size/250/(1024*1024)
+            bandwidth_sorted = np.sort(bandwidth)
+            n = len(bandwidth_sorted)
+            cdf = np.arange(1, n+1) / n
+            migrations_cdf = np.cumsum(bandwidth_sorted)/cdf
+            #migrations_cdf_extended = np.append(migrations_cdf, 1.0)  # 100% of data below 4 GB/s
+            plt.plot(bandwidth_sorted,migrations_cdf, label=name)
+            #plt.figure(figsize=(10,10))
+            #plot_migrations_over_time(t, migrations, "Total pages migrated over time for " + bench, run)
+            #continue
+
+
+
+
+            plt.figure(figsize=(10,10))
+            page_size = 4096
+            bandwidth = np.diff(migrations)*page_size/250/(1024*1024)
+            plt.plot(t[:-1], bandwidth, label="Bandwidth")
+            plt.title("Bandwidth tiering overhead over time for " + bench )
+            plt.xlabel("Time (ms)")
+            plt.ylabel("Bandwidth (GB/s)")
+            plt.ylim(0, 3)
+            plt.savefig(f"{FIGS_FOLDER}/real_data/" + os.path.basename(run) + "_bandwidth.png")
+            plt.close()
+
+            
+            from scipy import stats
+            bandwidth_sorted = np.sort(bandwidth)
+            #migrations_cdf = stats.rankdata(bandwidth_sorted, method='max') / len(bandwidth)
+
+            #bandwidth_extended = np.append(bandwidth_sorted, 4.0)
+            n = len(bandwidth_sorted)
+            cdf = np.arange(1, n+1) / n
+            migrations_cdf = np.cumsum(bandwidth_sorted)/cdf
+            #migrations_cdf_extended = np.append(migrations_cdf, 1.0)  # 100% of data below 4 GB/s
+
+            plt.plot(bandwidth_sorted,migrations_cdf, label="CDF")
+            plt.xlim(0, 4.0)
+            plt.ylim(0, 1.0)
+            #plt.plot(migrations_cdf,bandwidth_sorted, label="CDF")
+            plt.title("CDF of migrations bandwidth for " + bench )
+            plt.ylabel("CDF")
+            plt.xlabel("Bandwidth (GB/s)")
+            plt.savefig(f"{FIGS_FOLDER}/real_data/" + os.path.basename(run) + "_migrations_cdf.png")
+            plt.close()
+        except Exception as e:
+            print(e)
+            pass
+        
+    plt.savefig(f"{FIGS_FOLDER}/real_data/" + os.path.basename(run) + "_combined_OT_migrations.png")
+    plt.close()
+    plt.xlim(0, 4.0)
+    plt.ylim(0, 1.0)
+    #plt.plot(migrations_cdf,bandwidth_sorted, label="CDF")
+    plt.title("CDF of migrations bandwidth for " + bench )
+    plt.ylabel("CDF")
+    plt.xlabel("Bandwidth (GB/s)")
+    plt.savefig(f"{FIGS_FOLDER}/real_data/COMBINED_migrations_cdf.png")
+    plt.close()
+        #plt.savefig(f"{FIGS_FOLDER}/../real_data/plots/{b}_speedup.png")
+    exit(0)
+    
+    
+
+#plot_migrations_overtime()
+#exit(0)
+
+
+def real_parser():
+    path ="/home/ist196723/nas/osdi26/real_data/numpy/"
+    files = os.listdir(path)
+    data = {}
+    for file in files:
+        bfile = os.path.basename(file) 
+        if bfile == "mode" or bfile == "bin":
+            # import as a numpy with strings
+            data[bfile] = np.genfromtxt(path + file, dtype=str, filling_values=np.nan)
+        else:
+            data[bfile] =  np.genfromtxt(path + file, dtype=float, filling_values=np.nan)
+    # visualize all the collected data
+    for k in data.keys():
+        print(k)
+        print(data[k])
+
+    systems = {
+        "all_cxl": data['mode'] == "MEMTIS-numactl-0",
+        "fast_baseline": data['mode'] == "MEMTIS-numactl-90000",
+        "asmem": np.char.startswith(data['mode'], "MEMTIS-MAIS_MAIS"), 
+        "memtis_no_mig_slow": data['mode']== "MEMTIS-NORMAL-0",
+        "memtis_no_mig_fast": data['mode'] == "MEMTIS-NORMAL-90000",
+        "memtis": data['mode'] == "MEMTIS-NORMAL-(?!90000|0)[0-9]+"
+    }
+    baseline_system = "fast_baseline"
+    baseline_mig = "memtis"
+    ## check where are nans
+
+    systems_avg_time = {
+    }
+    systems_avg_mig = {
+    }
+
+    benches = np.unique(data['bin'])
+    print("Doing averages")
+    for b in benches:
+        #idx = np.where(data['bin'] == b)
+        
+        print(b)
+        systems_avg_time[b] = {}
+        systems_avg_mig[b] = {}
+        for name,sel  in systems.items():
+            try:
+                intersect = np.where((data['bin'] == b) & sel)[0]
+                if len(intersect) == 0:
+                    print(name, " slice is empty")
+                    continue
+                # remove outliers by percentile
+                outliers_percentile = 10
+                outliers_idx = np.where(data['time'][intersect] > np.percentile(data['time'][intersect], outliers_percentile))[0]
+                intersect = np.delete(intersect, outliers_idx)
+                print(name, "{:.2f}".format(np.average(data['time'][intersect])), "{:.2f}".format(np.average(data['migs'][intersect])))
+                print(name, data['time'][intersect])
+                systems_avg_time[b][name] = np.average(data['time'][intersect])
+                if "all_cxl" in name or "fast_baseline" in name: 
+                    continue
+                systems_avg_mig[b][name] = np.average(data['migs'][intersect])
+            except Exception as e:
+                print(e)
+                pass
+
+    print("Normalizing")
+    """
+    for b in benches:
+        for name,sel in systems.items():
+            try:
+                if np.isnan(systems_avg_time[b][baseline_system]) or np.isnan(systems_avg_mig[b][baseline_system]):
+                    print("Skipping", b, name, "because it has nan values")
+                    continue
+                systems_avg_time[b][name] = systems_avg_time[b][name]/systems_avg_time[b][baseline_system]
+                systems_avg_mig[b][name] = systems_avg_mig[b][name]/systems_avg_mig[b][baseline_system]
+            except KeyError:
+                print("Skipping", b, name, "because it is not in the dictionary")
+                continue
+    """
+    # plot the data
+    for b in benches:
+        bi= b
+        #for i in range(0,len(benches),10):
+            ##plt.subplot(len(benches)//10,1,i//10+1)
+        col_values = [
+            systems_avg_time[bi][mode]
+            for mode in systems_avg_time[bi].keys()
+        ]
+        col_values_mig = [
+            systems_avg_time[bi][mode]
+            for mode in systems_avg_time[bi].keys()
+        ]
+        col_names = [
+            bi + "_" + mode
+            for mode in systems_avg_time[bi].keys()
+        ]
+        print(len(col_names), col_names)
+        print(len(col_values), col_values)
+        print(len(col_values),"mig", col_values_mig)
+
+
+        plt.figure(figsize=(10,10))
+        plt.bar(col_names, col_values)
+        # xticks 5
+        plt.xticks(rotation=45)
+        plt.title("Execution time for " + b)
+        plt.ylabel("Time")
+        plt.xlabel("Systems")
+        plt.savefig(f"{FIGS_FOLDER}/../real_data/plots/{b}_speedup.png")
+        plt.close()
+        plt.figure(figsize=(10,10))
+
+        col_names = [
+                bi + "_" + mode 
+            
+            for mode in systems_avg_mig[bi].keys() if mode != "all_cxl" and mode != "fast_baseline"
+        ]
+        col_values_mig = [
+            systems_avg_mig[bi][mode]
+            for mode in systems_avg_mig[bi].keys() if mode != "all_cxl" and mode != "fast_baseline"
+        ]
+        plt.bar(col_names, col_values_mig)
+        # xticks 5
+        plt.xticks(rotation=0)
+        plt.title("Migrations for " + bi)
+        plt.ylabel("Migrations")
+        plt.xlabel("Systems")
+        plt.savefig(f"{FIGS_FOLDER}/../real_data/plots/{b}_migrations.png")
+        plt.close()
+    exit(0)
+        
+    plt.figure(figsize=(20,6))
+    #for i in range(0,len(benches),10):
+        ##plt.subplot(len(benches)//10,1,i//10+1)
+    col_names = [
+        bi + "_" + mode
+        for bi in benches
+        for mode in systems_avg_time[bi].keys()
+    ]
+    col_values = [
+        systems_avg_time[bi][mode]
+        for bi in benches
+        for mode in systems_avg_time[bi].keys()
+    ]
+    print(len(col_names), col_names)
+    print(len(col_values))
+
+
+    plt.bar(col_names, col_values)
+    # xticks 5
+    plt.xticks(rotation=45)
+    plt.title("Speedup")
+    plt.ylabel("Speedup")
+    plt.xlabel("Systems")
+    plt.savefig(f"{FIGS_FOLDER}/../real_data/plots/speedup.png")
+    plt.close()
+    exit(0)
+
+    plt.figure(figsize=(10,10))
+    for i in range(0,len(benches),10):
+        plt.subplot(len(benches)//10,1,i//10+1)
+        plt.bar(list(systems_avg_mig.keys()), [systems_avg_mig[k][i] for k in systems_avg_mig.keys()])
+        plt.title(benches[i])
+        plt.ylabel("Migration Rate")
+        plt.xlabel("Systems")
+    plt.savefig(f"{FIGS_FOLDER}/../real_data/plots/migs.png")
+    plt.close()
+    
+    
+            
+
+#real_parser()
+
 
 
 # list all the files in RUN_DATA_FOLDER
@@ -46,17 +1359,6 @@ def append_dict(k,d):
         global_learn[k] = []
     global_learn[k].append(d)
 
-def iterate_over_benches(data, function):
-    global bench_nr
-    global bench_name
-    
-    for r in data:
-        bench_nr = data[r]['0']['benchnr']
-        bench_name = data[r]['0']['bench'].split("/")[-1]
-        if '0' not in data[r].keys() or '80' not in data[r].keys():
-            print("Skipped run", list(data[r].values())[0]['benchnr'])
-            continue
-        function(data, r)
 import numpy as np
 def do_important_plots(data):
     calculate_derivates(data)
@@ -458,124 +1760,10 @@ def lossy_normalize_weight(weight_set):
     return weight_set / np.min(weight_set)
     
 
-def obtain_weights(data, r):
-    print("Obtaining weights for", r)
-    l = load_aggregate_fields(data, r)
-    l80 = load_aggregate_fields(data, r, 80)
-    #l = l80
+by_binary_weights = {}
 
-    i = load_inst_fields(data, r)
-    i80 = load_inst_fields(data, r, 80)
-
-    by_instruction_sampling = True # '/mnt/nas/inesc/ist196723/osdi26/results_gem5/100227/
-    if by_instruction_sampling:
-        l = i
-        l80 = i80
-
-    def split_data_by_instruction(nparray, instructions,l3_idx):
-        new_arrays = []
-        for i in instructions:
-            idx = np.where((nparray !=  i))
-            # zero out the array where idx is false
-            new_arrays.append(np.intersect1d(l3_idx, idx))
-            #new_arrays.append(nparray[idx])
-        return new_arrays
-    
-    try:
-
-        if by_instruction_sampling:
-            l3_idx = (np.where(l['totalTime']  > 30) & (l['isStore'] == 0) & (l['isLoad'] == 1)  & (l['tlb_miss'] == 0) ) # ignore TLB misses. we cannot optimize them 
-            # np array of the same size as l['totalTime']
-            l['count'] = np.ones_like(l['totalTime'])
-        else:
-            #accessBracket
-            l['accessBracket'] = l['accessBracket'] * 16
-            l3_idx = (np.where(l['accessBracket']  > 30) & (l['isStore'] == 0) & (l['isLoad'] == 1)  & (l['tlb_miss'] == 0) ) # ignore TLB misses. we cannot optimize them 
-            #l3_idx =np.intersect1d(np.where(l['count'] > 0),   np.where(l['accessBracket'] > 32) )# , np.where(l['tlbMiss'] == 0))
-        #l3_idx = np.where(l['count'] > 0)
-        #idxs = split_data_by_instruction(l['address'], unique_instructions, l3_idx)
-        unique_instructions = np.unique(l['address'][l3_idx])
-        print("There ARE!", len(unique_instructions), "instructions and ", len(l['address']), "total")
-        #print("unique_instructions", unique_instructions)
-        d = {}
-        for i in unique_instructions:
-            d[i] = {}
-
-        i = 0
-        metrics = []
-        for inst in unique_instructions:
-            sel = np.where(l['address'] == inst)
-            sel = np.intersect1d(sel, l3_idx)
-            length_sel = len(sel)
-            #print("length_sel", length_sel)
-            #print(np.sum(l['stallTime'][sel] / l['count'][sel]) / length_sel)
-            #print(np.sum(l['stallTime'][sel]/l['count'][sel], dtype=np.float64) / length_sel)
-            d[inst]['Acost_inst_stall_time'] = np.sum(l['stallTime'][sel]/l['count'][sel], dtype=np.float64) / length_sel
-            #print(int(d[inst]['cost_inst_stall_time']))
-            d[inst]['Bcost_inst_L3stall_time'] = np.sum(l['L3stallTime'][sel]/l['count'][sel], dtype=np.float64) / length_sel
-
-            d[inst]['Ccost_inst_L3MLP'] = np.sum(l['L3stallCyclesMLPLoad'][sel]/l['count'][sel], dtype=np.float64) / length_sel
-            d[inst]['Dcost_inst_MLP'] = np.sum(l['stallCyclesMLPLoad'][sel]/l['count'][sel], dtype=np.float64) / length_sel
-
-            #d[inst]['cost_inst_L3stall/stall'] = np.sum(l['L3stallTime'][sel]/l['count'][sel]/l['stallTime'][sel], dtype=np.float64) / length_sel
-            #d[inst]['cost_inst_L3stall'] = np.sum(l['L3stallTime'][sel]/l['count'][sel], dtype=np.float64) / length_sel
-
-            # TODO WHY??
-            #d[inst]['cost_inst_3MLP/3stall'] = 10 #  np.sum(l['L3stallCyclesMLPLoad'][sel]/l['count'][sel]/l['L3stallTime'][sel], dtype=np.float64) / length_sel
-            #d[inst]['cost_inst_MLP*total/stall'] = np.sum(l['stallCyclesMLPLoad'][sel]*l['totalTime'][sel]/(l['stallTime'][sel]*l['count'][sel]), dtype=np.float64) / length_sel
-
-            d[inst]['Ecost_inst_MLP/stall'] = np.sum(l['stallCyclesMLPLoad'][sel]/l['stallTime'][sel]/l['count'][sel], dtype=np.float64) / length_sel
-            d[inst]['Fcost_inst_MLP/total'] = np.sum(l['stallCyclesMLPLoad'][sel]/l['totalTime'][sel]/l['count'][sel], dtype=np.float64) / length_sel
-            metrics = d[inst].keys()
-            """
-            """
-            #d[i]['cost_inst_delta'] = np.sum(
-            #    (l80['stallTime'][idxs80[a]]/l80['count'][idxs80[a]]) - (l['L3stallTime'][sel]/l['count'][sel]))
-            i+=1
-        # convert from dictionary INST METRIC to dicitonary METRIC numpy array  
-        metricas_numpy = {}
-        instructions = np.array(sorted(list(d.keys())))
-        for m in metrics:
-            print("metricccccccccccc", m)
-            metricas_numpy[m] = np.zeros(len(instructions))
-            for i, inst in enumerate(instructions):
-                metricas_numpy[m][i] = d[inst][m]
-    
-        
-        for quantization_level in range(10, 500, 10): # only cap the top at the last
-            bins = np.array([ v for v in range(0, 500, quantization_level)]) #np.linspace(0, 500, quantization_level)
-            for m in sorted(list(metricas_numpy.keys()))[0:1]:
-                digitized = np.digitize(metricas_numpy[m], bins)
-                diff =  np.insert(np.diff(digitized), 0, 1)
-                compressed_map = digitized[diff != 0]
-                #print("Compressed ",  len(compressed_map) / len(digitized), " times!")
-        """
-        """
-
-        
-
-        """
-        # add columns to this numpy array for each metric
-        metrics_names = (list(d[instructions[0]].keys()))
-        metricas_numpiadas = {}
-        for m in metrics_names:
-            metricas_numpiadas[m] = np.zeros(len(instructions))
-            for i, inst in enumerate(instructions):
-                metricas_numpiadas[m][i] = d[inst][m]
-        
-        #
-        metricas_finais = {}
-
-        # BUGGGGGGGGGGGGGG HERE BUG
-        for m in ["const_inst_L3MLP"]:#metrics_names:
-            metricas_finais[m] = np.copy(metricas_numpiadas[m])
-            for mode in WEIGHT_MODES:
-                metricas_finais["{}-{}".format(m, mode)] = statistical_weight(metricas_numpiadas[m], mode)
-            metricas_finais["{}-{}".format(m, "lossless") ] = lossless_normalize_weight(metricas_numpiadas[m])
-            metricas_finais["{}-{}".format(m, "lossy") ] = lossy_normalize_weight(metricas_numpiadas[m])
-
-        """
-        def serialize_weights(metricas_finais):
+def serialize_weights(metricas_finais, instructions, data,r):
+            global success_run
             # each entry of metricas_finais is a column and each instruction is a line/row
             out= ""
             #mmm = sorted(metrics_names.keys())
@@ -592,19 +1780,28 @@ def obtain_weights(data, r):
                     info += str(i) + "-" + m + " "
                     i+=1
                 print(info)
+            """
+            for m in metricas_finais:
+                smallest = np.min(metricas_finais[m])
+                metricas_finais[m] = metricas_finais[m] - smallest + 1
+            """
             
+            if len(instructions) <= 2:
+                print('Less than 2 instructions... aborting')
+                return
 
             #print_numerated_column(mmm)
             
-            print("There are ", len(instructions), "instructions")
+            print("There are ", len(instructions), "instructions!!!!")
             for i in range(len(instructions)):
                 out += str(int(instructions[i])) + " "
                 for m in sorted(metricas_finais.keys()):
                         try:
-                            print(str(int(metricas_finais[m][i])), " metric", m, "inst", instructions[i])
+                            print(str([ int(metricas_finais[m][i]) for i  in range(len(instructions))]), " metric", m, "inst", instructions[i])
                             value = str(int(metricas_finais[m][i]))
-                        except:
-                            value = "1914"
+                        except Exception as e:
+                            value = "1234"
+                            raise e
                         out += value + " "
                 out += "\n"
             out = (str(len(instructions)+1) + " ") * 10 + "\n" +  out
@@ -616,11 +1813,304 @@ def obtain_weights(data, r):
             # print only first 10 and last 10 lines
             print('\n'.join(out.split('\n')[:10])  + "\n...\n" + '\n'.join(out.split('\n')[-10:]))
             print("#"*20)
-            with open(f'{FIGS_FOLDER}/maps/{binary} {r}.txt', 'w') as f:
+
+            #os.makedirs(f"{FIGS_FOLDER}/maps/{binary}{r]/vars/{var}", exist_ok=True)
+            #plt.savefig(f"{FIGS_FOLDER}/gen/vars/{var}/_0_{bench_name}_{bench_nr}_0.png")
+            with open(f'{FIGS_FOLDER}/maps/{binary} {r}.txtWOW', 'w') as f:
                 f.write(out)
+            success_run += 1
             return out 
+
+corrupted_vars = {}
+def ow():
+    global RUN_DATA_FOLDER
+    global inst_types
+    #RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/v4/results_gem5"
+    data = load_bench_data()
+    #iterate_over_benches(data, obtain_weights) 
+    iterate_over_benches(data, ooo) 
+
+def to_numpy(dict_of_insts, instructions):
+    d = dict_of_insts
+    metrics_names = (list(d[instructions[0]].keys()))
+    metricas_numpiadas = {}
+    for m in metrics_names:
+        metricas_numpiadas[m] = np.zeros(len(instructions))
+        for i, inst in enumerate(instructions):
+            metricas_numpiadas[m][i] = d[inst][m]
+    return metricas_numpiadas
+        
+
+def ooo(data,r):
+    global aggregate_fields
+    global RUN_DATA_FOLDER
+    RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/results_gem5"
+    
+
+    l = load_aggregate_fields(data, r)
+    l80 = load_aggregate_fields(data, r, 80)
+    unique_instructions = np.unique(l['address'])
+    valid_entries = (l['accessBracket'] > 1) & (l['count'] >= 1)  # & (l['address'] != 0)
+    # access bracket must be > 2 , acces Count >= 1
+    MLP_PRECISION_FACTOR=1024
+    d = {}
+    for i in unique_instructions:
+        d[i] = {}
+    for n in unique_instructions:
+        sel = np.where(l['address'] == n)
+        sel = np.intersect1d(sel, valid_entries)
+        print(l['stallTime'][sel].sum(), l['count'][sel].sum())
+        print('average',  l['L3stallTime'][sel].sum() / l['count'][sel].sum())
+        if l['totalTime'][sel].sum() < l['count'][sel].sum():
+            raise Exception("Stall time is less than count")
+            #print(l['stallTime'][sel].sum(), l['count'][sel].sum())
+
+        return
+        
+        d[n]['Acost_inst_stall_time'] = np.sum(l['stallTime'][sel], dtype=np.float64) / l['count'][sel].sum()
+        d[n]['Bcost_inst_L3stall_time'] = np.sum(l['L3stallTime'][sel], dtype=np.float64) / l['count'][sel].sum()
+        d[n]['Ccost_inst_L3MLP'] = np.sum(l['L3stallCyclesMLPLoad'][sel]/MLP_PRECISION_FACTOR, dtype=np.float64) / l['count'][sel].sum()
+        d[n]['Dcost_inst_MLP'] = np.sum(l['stallCyclesMLPLoad'][sel]/MLP_PRECISION_FACTOR, dtype=np.float64) / l['count'][sel].sum()
+        d[n]['Fcost_inst_totalTime'] = np.sum(l['totalTime'][sel]/MLP_PRECISION_FACTOR, dtype=np.float64) / l['count'][sel].sum()
+        
+        for m in d[n].keys():
+            d[n][m] = np.where(np.isnan(d[n][m]), 0, d[n][m])
+    serialize_weights(to_numpy(d, unique_instructions), unique_instructions, data,r)
+    
+        
+def obtain_weights(data,r):
+    global corrupted_vars
+    global inst_types
+
+    inst_types['address'] = np.uint32 
+    inst_types['L3stallCyclesMLPLoad'] = np.uint64
+    inst_types['stallCyclesMLPLoad'] = np.uint32
+    inst_types['stallTime'] = np.uint16
+    #inst_types['L3stallTime'] = np.uint16
+    inst_types['totalTime'] = np.uint16
+    #{'average_l3mlp': np.uint8,'tlb_miss': np.uint8,'isLoad': np.uint8,'isStore': np.uint8,'isMicroop': np.uint8,'address': np.uint64,'lastStallTime': np.uint16,'totalTime': np.uint16, 'stallTime': np.uint16, 'L3stallTime': np.uint16, 
+    #        'L3stallCyclesMLPLoad': np.uint64, 'stallCyclesMLPBoth': np.uint64, 'MLP_store_at_start': np.uint8, 'MLP_store_at_end': np.uint8, 'MLP_load_at_start': np.uint8, 'MLP_load_at_end': np.uint8, 'L3MLP_store_at_start': np.uint8, 'L3MLP_store_at_end': np.uint8, 'L3MLP_load_at_start': np.uint8, 'L3MLP_load_at_end': np.uint8, 'L3MLP_store_at_middle': np.uint8, 'L3MLP_load_at_middle': np.uint8,
+    print("Obtaining weights for", r)
+    
+    #l = load_aggregate_fields(data, r)
+    #l80 = load_aggregate_fields(data, r, 80)
+    #l = l80
+
+    i = load_inst_fields(data, r)
+    i80 = load_inst_fields(data, r, '80')
+
+    by_instruction_sampling = True # '/mnt/nas/inesc/ist196723/osdi26/results_gem5/100227/
+    if by_instruction_sampling:
+        l = i
+        l80 = i80
+        #l = l80
+
+    def split_data_by_instruction(nparray, instructions,l3_idx):
+        new_arrays = []
+        for i in instructions:
+            idx = np.where((nparray !=  i))
+            # zero out the array where idx is false
+            new_arrays.append(np.intersect1d(l3_idx, idx))
+            #new_arrays.append(nparray[idx])
+        return new_arrays
+    
+    try:
+
+        print(len(l['totalTime']), len(l['address']), "GIVE UP")
+        if by_instruction_sampling:
+            l3_idx = (np.where(l['totalTime']  > 30  )) # & (l['tlb_miss'] == 0) )) # ignore TLB misses. we cannot optimize them 
+            # np array of the same size as l['totalTime']
+            l['count'] = np.ones_like(l['totalTime'])
+        else: #:(l['isStore'] == 0)
+            #accessBracket
+            l['accessBracket'] = l['accessBracket'] * 16
+            l3_idx = (np.where(l['accessBracket']  > 0)) #&     (l['tlb_miss'] == 0) ) # ignore TLB misses. we cannot optimize them 
+            #l3_idx =np.intersect1d(np.where(l['count'] > 0),   np.where(l['accessBracket'] > 32) )# , np.where(l['tlbMiss'] == 0))
+        #l3_idx = np.where(l['count'] > 0)
+        #idxs = split_data_by_instruction(l['address'], unique_instructions, l3_idx)
+        #print(len(l['totalTime']), len(l['address']), "GIVE UP")
+        #return
+        print('wow', len(l['address'][l3_idx]), len(l['L3stallCyclesMLPLoad']))
+        unique_instructions = np.unique(l['address'][l3_idx])
+
+        print(np.histogram(l['L3stallCyclesMLPLoad'][l3_idx]), 'jooo')
+        print("There ARE!!", len(unique_instructions), "for", data[r]['0']['bench'],data[r]['0']['benchnr'] )
+        print("There ARE!", len(unique_instructions), "instructions and ", len(l['address']), "totall", "Number of lost instructions due to the narrow criteria:", len(np.unique(l['address'])) - len(unique_instructions))
+        print(((l['L3stallCyclesMLPLoad'][l3_idx] > 1024*200).sum() / len(l['L3stallCyclesMLPLoad'][l3_idx])) * 100 , "% of L3stallCyclesMLPLoad that are above 1024*200")
+        #l3_to_ignore = (l['L3stallCyclesMLPLoad'] <  1)#(l['L3stallCyclesMLPLoad'] <  1024*200)
+        #print("unique_instructions", unique_instructions)
+        d = {}
+        for i in unique_instructions:
+            d[i] = {}
+
+        if len(l['totalTime'] > 600) > 0:
+            corrupted_vars['totalTime'] = True
+        if len(l['stallTime'] > 600) > 0:
+            corrupted_vars['stallTime'] = True
+        #if len(l['L3stallTime'] > 600) > 0:
+        #    corrupted_vars['L3stallTime'] = True
+        if len(l['L3stallCyclesMLPLoad'] > 600*MLP_PRECISION_FACTOR) > 0:
+            corrupted_vars['L3stallCyclesMLPLoad'] = True
+        if len(l['stallCyclesMLPLoad'] > 600*MLP_PRECISION_FACTOR) > 0:
+            corrupted_vars['stallCyclesMLPLoad'] = True
+        i = 0
+        metrics = []
+        MLP_PRECISION_FACTOR = 1024
+        for inst in unique_instructions:
+            sel = np.where(l['address'] == inst)
+            sel = np.intersect1d(sel, l3_idx)
+            #length_sel = len(sel)
+            #length_sel = 1
+            if inst == 0:
+                continue
             
-        serialize_weights(metricas_numpy)
+            l3_stall_is_nan = np.isnan(l['L3stallTime'][sel])
+            print("L3 STALL IS NAN", len(l3_stall_is_nan))
+            d[inst]['Acost_inst_stall_time'] = np.sum(l['stallTime'][sel], dtype=np.float64) / l['count'][sel].sum()
+            d[inst]['Bcost_inst_L3stall_time'] = np.sum(l['L3stallTime'][sel][~l3_stall_is_nan], dtype=np.float64) / l['count'][sel][~l3_stall_is_nan].sum()
+            d[inst]['Ccost_inst_L3MLP'] = np.sum(l['L3stallCyclesMLPLoad'][sel]/MLP_PRECISION_FACTOR, dtype=np.float64) / l['count'][sel].sum()
+            d[inst]['Dcost_inst_MLP'] = np.sum(l['stallCyclesMLPLoad'][sel]/MLP_PRECISION_FACTOR, dtype=np.float64) / l['count'][sel].sum()
+            d[inst]['Fcost_inst_totalTime'] = np.sum(l['totalTime'][sel]/MLP_PRECISION_FACTOR, dtype=np.float64) / l['count'][sel].sum()
+            continue
+
+            #print("length_sel", length_sel)
+            #print(np.sum(l['stallTime'][sel] / l['count'][sel]) / length_sel)
+            #print(np.sum(l['stallTime'][sel]/l['count'][sel], dtype=np.float64) / length_sel)
+            d[inst]['Acost_inst_stall_time'] = np.sum(l['stallTime'][sel], dtype=np.float64) / l['count'][sel].sum()
+            #print(int(d[inst]['cost_inst_stall_time']))
+            l3_sel = np.intersect1d(sel, l3_to_ignore)
+            l3_sel_length = len(l3_sel)
+            l3_sel_length = 1
+            l3_stall_is_nan = np.isnan(l['L3stallTime'][l3_sel])
+            if np.any(l3_stall_is_nan):
+                print("There are NaNs in L3stallTime for", inst)
+                print("Count of NaNs:", np.count_nonzero(l3_stall_is_nan))
+                print("Count of non NaNs:", np.count_nonzero(~l3_stall_is_nan))
+                print("Fraction of NaNs:", np.count_nonzero(l3_stall_is_nan)/len(l3_sel))
+            count_non_zero = np.count_nonzero(l['count'][sel] != 0)
+            print("Fraction of non zero counts:", count_non_zero/len(sel), "sum of counts",  l['count'][l3_sel][~l3_stall_is_nan].sum(),  l['count'][l3_sel].sum())
+
+            d[inst]['Bcost_inst_L3stall_time'] = np.sum(l['L3stallTime'][l3_sel][~l3_stall_is_nan], dtype=np.float64) / l['count'][l3_sel][~l3_stall_is_nan].sum()
+            if np.isnan(d[inst]['Bcost_inst_L3stall_time']):
+                print("There are NaNs in Bcost_inst_L3stall_time for", inst)
+                if 'bfs' in data[r]['0']['bench'] or 'bc' in data[r]['0']['bench']:
+                    print('SAD ENDING')
+                    exit()
+
+
+            d[inst]['Ccost_inst_L3MLP'] = np.sum(l['L3stallCyclesMLPLoad'][l3_sel]/MLP_PRECISION_FACTOR, dtype=np.float64) / l['count'][l3_sel].sum()
+            d[inst]['Dcost_inst_MLP'] = np.sum(l['stallCyclesMLPLoad'][sel]/MLP_PRECISION_FACTOR, dtype=np.float64) / l['count'][sel].sum()
+
+            #d[inst]['cost_inst_L3stall/stall'] = np.sum(l['L3stallTime'][sel]/l['count'][sel]/l['stallTime'][sel], dtype=np.float64) / length_sel
+            #d[inst]['cost_inst_L3stall'] = np.sum(l['L3stallTime'][sel]/l['count'][sel], dtype=np.float64) / length_sel
+
+            # TODO WHY??
+            #d[inst]['cost_inst_3MLP/3stall'] = 10 #  np.sum(l['L3stallCyclesMLPLoad'][sel]/l['count'][sel]/l['L3stallTime'][sel], dtype=np.float64) / length_sel
+            #d[inst]['cost_inst_MLP*total/stall'] = np.sum(l['stallCyclesMLPLoad'][sel]*l['totalTime'][sel]/(l['stallTime'][sel]*l['count'][sel]), dtype=np.float64) / length_sel
+
+            #d[inst]['Ecost_inst_MLP/stall'] = np.sum((l['stallCyclesMLPLoad'][sel]/MLP_PRECISION_FACTOR)/l['stallTime'][sel]/l['count'][sel], dtype=np.float64) / length_sel
+            d[inst]['Ecost_inst_MLP/stall'] = np.sum((l['stallCyclesMLPLoad'][sel]/MLP_PRECISION_FACTOR)) / l['count'][sel].sum()
+            # if d[inst]['Ecost_inst_MLP/stall'] < 0:
+            #    d[inst]['Ecost_inst_MLP/stall'] = 0
+
+            d[inst]['Fcost_inst_MLP/total'] = np.sum((l['stallCyclesMLPLoad'][sel]/MLP_PRECISION_FACTOR)/l['totalTime'][sel], dtype=np.float64) / l['count'][sel].sum()
+
+            d[inst]['Gcost_inst_stall*cost_inst_MLP'] = np.sum(l['stallCyclesMLPLoad'][sel]/MLP_PRECISION_FACTOR*l['stallTime'][sel], dtype=np.float64) / l['count'][sel].sum()
+            d[inst]['Hcost_inst_stall*cost_inst_MLP'] = np.sum(l['stallCyclesMLPLoad'][sel]/MLP_PRECISION_FACTOR*l['stallTime'][sel], dtype=np.float64) / l['count'][sel].sum()
+            metrics = d[inst].keys()
+            """
+            """
+            #d[i]['cost_inst_delta'] = np.sum(
+            #    (l80['stallTime'][idxs80[a]]/l80['count'][idxs80[a]]) - (l['L3stallTime'][sel]/l['count'][sel]))
+            i+=1
+        # convert from dictionary INST METRIC to dicitonary METRIC numpy array  
+        metricas_numpy = {}
+        instructions = np.array(sorted(list(d.keys())))
+        for m in metrics:
+            print("metricccccccccccc", m)
+            metricas_numpy[m] = np.zeros(len(instructions))
+            for i, inst in enumerate(instructions):
+                metricas_numpy[m][i] = d[inst][m]
+        #for inst, inst_addr in enumerate(instructions):
+        #    #m#etricas_numpy['Gcost_inst_stall*cost_inst_MLP'] =
+        print(metricas_numpy.keys())
+        metricas_numpy['Gcost_inst_stall*cost_inst_MLP'][:][ (metricas_numpy['Ccost_inst_L3MLP'][:] <= np.percentile(metricas_numpy['Ccost_inst_L3MLP'][:], 25))] = 1
+        metricas_numpy['Gcost_inst_stall*cost_inst_MLP'][:][ (metricas_numpy['Ccost_inst_L3MLP'][:] > np.percentile(metricas_numpy['Ccost_inst_L3MLP'][:], 25)) & (metricas_numpy['Ccost_inst_L3MLP'][:] <= np.percentile(metricas_numpy['Ccost_inst_L3MLP'][:], 75)) ] = 2
+        metricas_numpy['Gcost_inst_stall*cost_inst_MLP'][:][metricas_numpy['Ccost_inst_L3MLP'][:] < np.percentile(metricas_numpy['Ccost_inst_L3MLP'][:], 75)] = 4
+        #Hcost_inst_stall*cost_inst_MLP
+        #metricas_numpy['Ftop_10'] = np.copy(metricas_numpy['Ccost_inst_L3MLP']) 
+        #metricas_numpy['Ftop_10'][metricas metricas_numpy['Ccost_inst_L3MLP'] > np.percent(metricas_numpy['Ccost_inst_L3MLP'],90)] = 10
+        #metricas_numpy['Ftop_10'][ metricas metricas_numpy['Ccost_inst_L3MLP'] < np.percent(metricas_numpy['Ccost_inst_L3MLP'],90) ] = 1
+
+        if data[r]['0']['benchnr'] == '75':
+            exit(0)
+        
+        #d[inst]['Hcost_inst_stall*cost_inst_MLP'] 
+        #d[inst]['Hcost_inst_stall*cost_inst_MLP']  = 
+        #np.percentile(d[inst]['Ccost_inst_l3_mlp'], 75)
+        #np.percentile(d[inst]['Ccost_inst_l3_mlp'], 75)
+        
+        """
+        for m in sorted(list(metricas_numpy.keys()))[0:1]:
+            #for i in range(len(metricas_numpy[m])):
+            min = np.min(metricas_numpy[m][inst])
+            max = np.max(metricas_numpu[m])    
+            low_1_percent = np.percentile(metricas_numpy[m], 1)
+            if low_1_percent*0.5 > 1:
+                low_1_percent = low_1_percent*0.5
+            
+
+            bins = np.array([ v for v in range(min, max,  low_1_percent)]) #np.linspace(0, 500, quantization_level)
+            digitized = np.digitize(metricas_numpy[m], bins)
+            for m in sorted(list(metricas_numpy.keys()))[0:1]:
+            print("max", np.max(metricas_numpy[m]))
+        """
+        """
+        for quantization_level in range(10, 500, 10): # only cap the top at the last
+            bins = np.array([ v for v in range(0, 500, quantization_level)]) #np.linspace(0, 500, quantization_level)
+            for m in sorted(list(metricas_numpy.keys()))[0:1]:
+                digitized = np.digitize(metricas_numpy[m], bins)
+                diff =  np.insert(np.diff(digitized), 0, 1)
+                compressed_map = digitized[diff != 0]
+                #print("Compressed ",  len(compressed_map) / len(digitized), " times!")
+        """
+
+        """
+
+        
+        print("There ARE!!", len(unique_instructions), "for", data[r]['0']['bench'],data[r]['0']['benchnr'] )
+
+        """
+        # add columns to this numpy array for each metric
+        metrics_names = (list(d[instructions[0]].keys()))
+        metricas_numpiadas = {}
+        for m in metrics_names:
+            metricas_numpiadas[m] = np.zeros(len(instructions))
+            for i, inst in enumerate(instructions):
+                metricas_numpiadas[m][i] = d[inst][m]
+        
+        #
+        metricas_finais = {}
+
+        # BUGGGGGGGGGGGGGG HERE BUG
+        """
+        for m in ["const_inst_L3MLP"]:#metrics_names:
+            metricas_finais[m] = np.copy(metricas_numpiadas[m])
+            for mode in WEIGHT_MODES:
+                metricas_finais["{}-{}".format(m, mode)] = statistical_weight(metricas_numpiadas[m], mode)
+            metricas_finais["{}-{}".format(m, "lossless") ] = lossless_normalize_weight(metricas_numpiadas[m])
+            metricas_finais["{}-{}".format(m, "lossy") ] = lossy_normalize_weight(metricas_numpiadas[m])
+        """
+
+            
+        """
+        binary = data[r]['0']['bench'].split("/")[-1]
+        if binary not in by_binary_weights:
+            by_binary_weights[binary] = []
+        by_binary_weights[binary].append(d)
+        """
+        serialize_weights(metricas_numpy, instructions, data, r)
+        print('obtained weight nicely')
 
 
         
@@ -688,12 +2178,14 @@ def obtain_weights(data, r):
 
         
 
-    except FileNotFoundError:
+    except FileNotFoundError as e:
+        raise e
         print("... f not found..")
         import traceback
         traceback.print_exc()
         return
     except Exception as e:
+        raise e
         print("Failed to obtain weights for", r)
         print(e)
         print("MUAH")
@@ -929,6 +2421,7 @@ def build_run_data(line):
         "increase": line.split("increase: ")[1].split(" ")[0].strip(),
         "host": line.split("host: ")[1].split(" ")[0].strip(),
         "terminated": line.split("host:")[1].split(" ")[0].strip(),
+        "line" : line
         #"terminated-status": line.split("host:")[-1].split(" ")[-1].strip()
         }
 
@@ -957,13 +2450,20 @@ def NOOOOOload_from_splitted():
                 all_data[r_number] = {}
             if _['increase'] in all_data[r_number]: 
                 print("WARNING: Duplicate increase")
+                i = load_inst_fields(all_data, _)
+                #all_data[r_number][_['increase']] = _  ####### CHANGE
             else:
-                all_data[r_number][_['increase']] = _ 
+                pass
+                #all_data[r_number][_['increase']] = _ 
+            try:
+                print(i['average_l3mlp'])
+            except Exception as e:
+                print(e)
+                continue
             #_['global'] = load_struct(GlobalStatsss,glob.glob(f"/mnt/nas/inesc/ist196723/osdi26/results_gem5/global_{_['pid']}_{_['host']}*.bin")[0])
             #_['inst'] = load_struct(InstructionData,glob.glob(f"/mnt/nas/inesc/ist196723/osdi26/results_gem5/aggregate_{_['pid']}_{_['host']}*.bin")[0])
             #_['final'] = load_struct(FinalMetrics,glob.glob(f"/mnt/nas/inesc/ist196723/osdi26/results_gem5/inst_{_['pid']}_{_['host']}*.bin")[0])
                 #f"/mnt/nas/inesc/ist196723/osdi26/results_gem5/output_{rdata["host"]}.bin")
-    exit(0)
 
 import re
 def get_print_timestamps(run):
@@ -1002,6 +2502,32 @@ def get_print_timestamps(run):
 
     
 
+#class RunData:
+#def __init__(self, run):
+        
+def load_bench_data_pids():
+    f="/mnt/nas/inesc/ist196723/osdi26/l3mlp_dudes" 
+    all_data = {}
+    with open(f, 'r') as file:
+        for line in file:
+            pid = int(line.strip())
+            run = {
+                'benchid' :pid,
+                'benchnr' :pid,
+                'increase' : 0,
+                'host' : 'cc8ece5416c5',
+                'terminated' : 'TERMINATED',
+                'line' : line,
+                'bench': "unknown",
+                'pid': pid
+            }
+            all_data[pid] = {}
+            all_data[pid]['0'] = run
+            all_data[pid]['80'] = run
+    return all_data
+
+
+
 def load_bench_data():
     all_data = {}
     all_lines = []
@@ -1024,6 +2550,9 @@ def load_bench_data():
             if _['increase'] in all_data[r_number]: 
                 print("WARNING: Duplicate increase", line)
             all_data[r_number][_['increase']] = _ 
+            #def get_run_name(run):
+            #    return os.path.basename(run['0']['bench']).split('.')[0]
+
             #_['global'] = load_struct(GlobalStatsss,glob.glob(f"/mnt/nas/inesc/ist196723/osdi26/results_gem5/global_{_['pid']}_{_['host']}*.bin")[0])
             #_['inst'] = load_struct(InstructionData,glob.glob(f"/mnt/nas/inesc/ist196723/osdi26/results_gem5/aggregate_{_['pid']}_{_['host']}*.bin")[0])
             #_['final'] = load_struct(FinalMetrics,glob.glob(f"/mnt/nas/inesc/ist196723/osdi26/results_gem5/inst_{_['pid']}_{_['host']}*.bin")[0])
@@ -1044,9 +2573,12 @@ def get_field(run, struct,field_name, type_, convolve_skip=False):
         return cached_fields[(run['pid'], struct, field_name)]
     arr =  np.fromfile(f"{RUN_DATA_FOLDER}/{run['pid']}/_{struct}_{field_name}_{run['pid']}.txt", dtype=type_)
     #print("Average window size", average_window_size)
-    average_window_size = 250
-    if not convolve_skip:
+    #print("convo", convolve_skip)
+    if type(convolve_skip) == int and convolve_skip > 0:
+        #print("humm")
+        average_window_size = convolve_skip
         arr = np.convolve(arr, np.ones(average_window_size)/average_window_size, mode='valid')
+        #print("Convolved", arr.shape[0], "to", arr.shape[0])
     cached_fields[(run['pid'], struct, field_name)] = arr
     return arr
 
@@ -1068,6 +2600,7 @@ def regress(arr, target):
     global regress_error
     # if dim does not match target fill to match
     biggest_size = max(arr.shape[0], target.shape[0])
+    print(arr.shape[0], target.shape[0], "shappppping")
     if arr.shape[0] != target.shape[0]:
         # cut by the smallest
         if arr.shape[0] < target.shape[0]:
@@ -1100,7 +2633,41 @@ def regress(arr, target):
     return predicted
     
 from scipy.optimize import curve_fit
+def obtain_soar_inst(selections, L3_MLP, L3_stall, acess_time, real):
+    import numpy as np
+    from scipy.optimize import curve_fit
+
+    def fit_func(r, a, b):
+
+    # A,B -0.4477149036453043 0.1349315011644008
+        #soar_metric = i['stallTime'][sel] /  ( i['L3MLP_load_at_middle'][sel] * b  + a * i['totalTime'][sel] ) 
+        results = np.zeros(len(selection))
+        print('ho')
+        for i in range(len(selection)):
+            results[i] = np.sum( L3_stall[i] / (a*L3_MLP[i] + b * acess_time[i]) )
+        print('hi')
+        return results
+
+    print('0llll')
+    initial_guess = [10, 1]
+    popt, pcov = curve_fit(fit_func, np.array(range(len(selections))), real, p0=initial_guess, maxfev=1000)
+    a_opt, b_opt = popt
+    a_err, b_err = np.sqrt(np.diag(pcov))
+    fitted_real = fit_func(L3_stall, a_opt, b_opt)
+
+    residuals = real - fitted_real
+    ss_res = np.sum(residuals**2)
+    ss_tot = np.sum((real - np.mean(real))**2)
+    r_squared = 1 - ss_res / ss_tot
+    rmse = np.sqrt(np.mean((real - fitted_real) ** 2))
+    regress_error.append(rmse)
+    print(f'MSRE-S {rmse:.3f}')
+    return [fitted_real, a_opt, b_opt, rmse]
+OPTIMAL_A = None
+OPTIMAL_B = None
 def obtain_soar_mlp_aware_slowdown(unadjusted, AOL, out):
+    global OPTIMAL_A
+    global OPTIMAL_B
     import numpy as np
     from scipy.optimize import curve_fit
 
@@ -1136,7 +2703,9 @@ def obtain_soar_mlp_aware_slowdown(unadjusted, AOL, out):
 
     # Optional: compute the fitted real_slow_down values
     fitted_real = fit_func(AOL, a_opt, b_opt)
-
+    print('OPTIMAL A AND B ', a_opt, b_opt)
+    OPTIMAL_A = a_opt
+    OPTIMAL_B = b_opt
     # Example: compute and print R-squared
     residuals = real - fitted_real
     ss_res = np.sum(residuals**2)
@@ -1333,8 +2902,8 @@ def calculate_by_sample_cost(data,r):
                         d['cost_inst_MLP_abs'] = np.sum(i['stallCyclesMLPLoad'][indexes]/inside_factor) 
                         d['cost_inst_stall_time'] = np.sum(i['stallTime'][indexes]/inside_factor) / cycles_elapsed
                         d['cost_inst_L3stall_time'] = np.sum(i['L3stallTime'][indexes]/inside_factor) / cycles_elapsed
-                        d['cost_inst_L3MLP'] = np.sum(i['L3stallCyclesMLPLoad'][indexes]/inside_factor) / (cycles_elapsed*1024)
-                        d['cost_inst_MLP'] = np.sum(i['stallCyclesMLPLoad'][indexes]/inside_factor) / (cycles_elapsed*1024)
+                        d['cost_inst_L3MLP'] = np.sum(i['L3stallCyclesMLPLoad'][indexes]/inside_factor) / (cycles_elapsed*MLP_PRECISION_FACTOR)
+                        d['cost_inst_MLP'] = np.sum(i['stallCyclesMLPLoad'][indexes]/inside_factor) / (cycles_elapsed*MLP_PRECISION_FACTOR)
 
 
                         d['average_mlp_middle'] = np.sum(inst['L3MLP_load_at_middle'][indexes]) / cycles_elapsed
@@ -1684,8 +3253,10 @@ class DictWithGet(dict):
             return v
 
 fields = ['address' ,'totalTime', 'accessBracket','L3MLP_store_at_middle', 'L3MLP_load_at_middle', 'stallTime', 'L3stallTime', 'count' , 'stallCyclesMLPLoad', 'stallCyclesMLPStore', 'stallCyclesMLPBoth', 'L3stallCyclesMLPLoad'] # delta
-inst_types={'tlb_miss': np.uint8,'isLoad': np.uint8,'isStore': np.uint8,'isMicroop': np.uint8,'address': np.uint64,'lastStallTime': np.uint16,'totalTime': np.uint16, 'stallTime': np.uint16, 'L3stallTime': np.uint16, 
+inst_types={'average_l3mlp': np.uint8, 'average_mlp' :np.uint8, 'tlb_miss': np.uint8,'isLoad': np.uint8,'isStore': np.uint8,'isMicroop': np.uint8,'address': np.uint64,'lastStallTime': np.uint16,'totalTime': np.uint16, 'stallTime': np.uint16, 'L3stallTime': np.uint16, 
             'L3stallCyclesMLPLoad': np.uint64, 'stallCyclesMLPBoth': np.uint64, 'MLP_store_at_start': np.uint8, 'MLP_store_at_end': np.uint8, 'MLP_load_at_start': np.uint8, 'MLP_load_at_end': np.uint8, 'L3MLP_store_at_start': np.uint8, 'L3MLP_store_at_end': np.uint8, 'L3MLP_load_at_start': np.uint8, 'L3MLP_load_at_end': np.uint8, 'L3MLP_store_at_middle': np.uint8, 'L3MLP_load_at_middle': np.uint8,
+
+
 
 'start_cycle': np.uint64,
 'L3stallTime': np.uint16,
@@ -1694,12 +3265,29 @@ inst_types={'tlb_miss': np.uint8,'isLoad': np.uint8,'isStore': np.uint8,'isMicro
 'stallCyclesMLPBoth': np.uint64,
             
             }
+
+inst_types={'average_l3mlp': np.uint8, 'average_mlp' :np.uint8, 'tlb_miss': np.uint8,'isLoad': np.uint8,'isStore': np.uint8,'isMicroop': np.uint8,'address': np.uint64,'lastStallTime': np.uint16,'totalTime': np.uint16, 'stallTime': np.uint16, 'L3stallTime': np.uint16, 
+            'L3stallCyclesMLPLoad': np.uint32, 'stallCyclesMLPBoth': np.uint32, 'MLP_store_at_start': np.uint8, 'MLP_store_at_end': np.uint8, 'MLP_load_at_start': np.uint8, 'MLP_load_at_end': np.uint8, 'L3MLP_store_at_start': np.uint8, 'L3MLP_store_at_end': np.uint8, 'L3MLP_load_at_start': np.uint8, 'L3MLP_load_at_end': np.uint8, 'L3MLP_store_at_middle': np.uint8, 'L3MLP_load_at_middle': np.uint8,
+
+
+
+'start_cycle': np.uint64,
+'L3stallTime': np.uint16,
+'stallCyclesMLPLoad': np.uint32,
+'stallCyclesMLPStore': np.uint32,
+'stallCyclesMLPBoth': np.uint32,
+            
+            }
+
+#inst_types={'accessedMemory': np.uint64,'address': np.uint64,'totalTime': np.int16, 'stallTime': np.int16, 'L3stallTime': np.int16, 'lastStallTime': np.int16, 'stallCyclesMLPLoad': np.int64, 'stallCyclesMLPStore': np.int64, 'stallCyclesMLPBoth': np.int64, 'L3stallCyclesMLPLoad': np.int64, 'MLP_store_at_start': np.uint8, 'MLP_store_at_end': np.uint8, 'MLP_load_at_start': np.uint8, 'MLP_load_at_end': np.uint8, 'L3MLP_store_at_start': np.uint8, 'L3MLP_store_at_middle': np.uint8, 'L3MLP_store_at_end': np.uint8, 'L3MLP_load_at_start': np.uint8, 'L3MLP_load_at_middle': np.uint8, 'L3MLP_load_at_end': np.uint8, 'isMicroop': np.uint8, 'tlb_miss': np.uint8,'isLoad': np.uint8,'isStore': np.uint8,'start_cycle': np.uint64,}
 inst_fields = fields + ['lastStallTime']
 def load_inst_fields(data, r, tier='0', stop=np.inf):
     inst = DictWithGet()
     def gettter(f, stop):
-        field =  get_field(data[r][tier], INST, f, inst_types[f], convolve_skip=True)
+        field =  get_field(data[r][tier], INST, f, inst_types[f], convolve_skip=False)
         if f == 'start_cycle':
+            return field
+        if stop == np.inf:
             return field
         idxs = np.where(inst['start_cycle'] < stop)
         return field[idxs]
@@ -1712,7 +3300,47 @@ aggregate_types = {'totalTime': np.uint64,
                    'isStore' : np.uint8,
                    'isMicroop' : np.uint8,
                    'tlbMiss' : np.uint8,
+                   'stallTime' : np.uint64,
+                   'L3stallTime': np.uint64,
+                   'totalTime': np.uint64,
+                   'lastStallTime': np.uint64,
+                   'L3MLP_load_at_end': np.uint64,
+                   'MLP_load_at_end': np.uint64,
+                   'MLP_store_at_end': np.uint64,
+                   'L3MLP_store_at_end': np.uint64,
+                   'L3MLP_store_at_middle': np.uint64,
+                   'L3MLP_load_at_middle': np.uint64,
+                   'stallCyclesMLPLoad': np.uint64,
+                   'L3stallCyclesMLPLoad': np.uint64,
+                   'stallCyclesMLPStore': np.uint64,
+                   'stallCyclesMLPBoth': np.uint64,
                    }
+
+"""
+aggregate_types = {'totalTime': np.uint64, 
+                   'count': np.uint64, 
+                   'accessBracket': np.uint8, 'address': np.uint64,
+                   'isLoad' : np.uint8,
+                   'isStore' : np.uint8,
+                   'isMicroop' : np.uint8,
+                   'tlbMiss' : np.uint8,
+                   'stallTime' : np.uint64,
+                   'L3stallTime': np.uint64,
+                   'totalTime': np.uint64,
+                   'lastStallTime': np.uint64,
+                   'L3MLP_load_at_end': np.uint64,
+                   'MLP_load_at_end': np.uint64,
+                   'MLP_store_at_end': np.uint64,
+                   'L3MLP_store_at_end': np.uint64,
+                   'L3MLP_store_at_middle': np.uint64,
+                   'L3MLP_load_at_middle': np.uint64,
+                   'stallCyclesMLPLoad': np.uint64,
+                   'L3stallCyclesMLPLoad': np.uint64,
+                   'stallCyclesMLPStore': np.uint64,
+                   'stallCyclesMLPBoth': np.uint64,
+                   }
+"""
+
 global_types = {'totalSquashed': np.uint64,
 'totalStalledCyclesSummed': np.uint64,
 'totalL3StalledCyclesSummed': np.uint64,
@@ -1722,6 +3350,54 @@ global_types = {'totalSquashed': np.uint64,
     'stallCyclesMLPStore': np.uint64,
     'stallCyclesMLPBoth': np.uint64,
     'currentCycle': np.uint64, 'L3stalledCycles': np.uint64, 'stalledCycles': np.uint64, 'stalledCyclesDuringStore': np.uint64, 'stalledCyclesWithMemRequests': np.uint64, 'stalledCyclesWithStores': np.uint64, 'cyclesWithMemrequests': np.uint64, 'commitedStores': np.uint64, 'commitedLoads': np.uint64, 'commitedAtomic': np.uint64, 'commitedInstructions': np.uint64, 'totalSquashed': np.uint64, 'lastStallTime': np.uint64, 'currentCycle': np.uint64,  'tlbMisses': np.uint64}
+
+global_types = {
+    'totalStalledCyclesSummed': np.uint64,
+    'totalL3StalledCyclesSummed': np.uint64,
+    'totalL3MLPStalledCyclesSummed': np.uint64,
+    'totalMLPStalledCyclesSummed': np.uint64,
+
+
+    'totalAccessTimeSummed': np.uint64,
+    'totalL3AccessTimeSummed': np.uint64,
+    'commitedL3Misses': np.uint64,
+    'totalL3MLP_D_TotalAccessTimeSummed': np.uint64,
+    'totalL3_D_TotalAccessTimeSummed': np.uint64,  # L333 stalls
+    'totalMLPStalledCycles_D_TimeSummed': np.uint64,
+
+    'totalL3StallSummed': np.uint64,
+
+    'stallCyclesMLPLoad': np.uint64,
+    'stallCyclesMLPStore': np.uint64,
+    'stallCyclesMLPBoth': np.uint64,
+    'stalledCycles': np.uint64,
+    'stalledCyclesDuringStore': np.uint64,
+    'stalledCyclesWithMemRequests': np.uint64,
+    'stalledCyclesWithStores': np.uint64,
+    'cyclesWithMemrequests': np.uint64,  # the diff between 2 = A1 of SOAR
+    'commitedStores': np.uint64,
+    'commitedL3Loads': np.uint64,  # The dif betweeen 2 = A2
+    'commitedLoads': np.uint64,  # The dif betweeen 2 = A2
+    'commitedAtomic': np.uint64,
+    'commitedInstructions': np.uint64,
+    'totalSquashed': np.uint64,
+    'lastStallTime': np.uint64,
+    'currentCycle': np.uint64,
+    'loadCountByLatency': np.uint64,
+    'tlbMisses': np.uint64,
+
+    'onlyLoadsStalled': np.uint64,
+    'onlyStoresStalled': np.uint64,
+    'L3onlyLoadsStalled': np.uint64,
+    'L3onlyStoresStalled': np.uint64,
+
+    'L3stallCyclesMLPLoad': np.uint64,
+    'L3stallCyclesMLPStore': np.uint64,
+    'L3stallCyclesMLPBoth': np.uint64,
+    'L3stalledCycles': np.uint64,
+    'L3stalledCyclesDuringStore': np.uint64,
+    'L3cyclesWithMemrequests': np.uint64,  # the diff between 2 = A1 of SOAR
+}
 
 def load_aggregate_fields_frequency_normalized(data, r, tier='0'):
     # TODO
@@ -1757,9 +3433,9 @@ def load_global_fields_crescendo(data, r, tier='0'):
     d = DictWithGet()
     d.set_getter(lambda f : get_field(data[r][tier], GLOBAL, f, global_types[f], convolve_skip=True))
     return d 
-def load_global_fields(data, r, tier='0'):
+def load_global_fields(data, r, tier='0', convolve=True):
     d = DictWithGet()
-    d.set_getter(lambda f : fill_if_needed(get_field(data[r][tier], GLOBAL, f, global_types[f], convolve_skip=True)))
+    d.set_getter(lambda f : fill_if_needed(get_field(data[r][tier], GLOBAL, f, global_types[f], convolve_skip=convolve)))
     return d 
 
 def all_bench_loader(data,r):
@@ -2705,11 +4381,13 @@ def iterate_time_series(data,r):
 def plot_global_results():
     # real slow down vs the fitted metrics
     for k in global_results:
+        print(k, len(global_results[k]))
+        print(global_results[k])
         global_results[k] = np.array(global_results[k])
-    global_results['predicted_stall_cycles'] = regress( np.array(global_results['stall_cycles']),np.array(    global_results['mem_stalls']))
-    var = np.array(global_results['mem_stalls_weighted'])/np.array(global_results['cycles']) #/ np.array(global_results['commitedLoads'] )
+    #global_results['predicted_stall_cycles'] = regress( np.array(global_results['stall_cycles']),np.array(    global_results['mem_stalls']))
+    #var = np.array(global_results['mem_stalls_weighted'])/np.array(global_results['cycles']) #/ np.array(global_results['commitedLoads'] )
+    #global_results['predicted_mlp_simple'] = regress(var,np.array(global_results['real_slowdown']) ) / np.array(global_results['mem_stalls'])
 
-    global_results['predicted_mlp_simple'] = regress(var,np.array(global_results['real_slowdown']) ) / np.array(global_results['mem_stalls'])
     # iterate over all to convert to np array
     for k in global_results:
         global_results[k] = np.array(global_results[k])
@@ -2724,9 +4402,11 @@ def plot_global_results():
 
 
 
-    global_results['predicte d_load_n_store_weighted'] = multi_regress([  global_results['mem_stalls_weighted']/global_results['cycles'], global_results['store_stalls']/global_results['cycles'], ])
-    global_results['predicte d_store_stalls'] = multi_regress([ global_results['store_stalls']/global_results['cycles'], ])
+    #global_results['predicte d_load_n_store_weighted'] = multi_regress([  global_results['mem_stalls_weighted']/global_results['cycles'], global_results['store_stalls']/global_results['cycles'], ])
+    #global_results['predicte d_store_stalls'] = multi_regress([ global_results['store_stalls']/global_results['cycles'], ])
 
+    #print(len(glo))
+    print(len(global_results['stall_cycles']), len(global_results['aol']), len(global_results['real_slowdown']), len(global_results['cycles']))
     global_results['predicted_soar_mlp_aware_slowdown'] = obtain_soar_mlp_aware_slowdown(global_results['stall_cycles']/global_results['cycles'], global_results['aol'], global_results['real_slowdown'])
         
     plt.figure()
@@ -2864,6 +4544,7 @@ others_merged = {
     "MLPL3 D stallCycles": np.array([]),
     
 }
+weird_runs = []
 def simple_instruction_slowdown(data,r):
     global runs_with_weird_stuff
 
@@ -2873,11 +4554,12 @@ def simple_instruction_slowdown(data,r):
     g80 = load_global_fields(data, r, '80')
     try:
         last_idx = get_last_idx_of_smallest_vector(g80['currentCycle'],g0['currentCycle'])
-        if len(g80['currentCycle']) == 0 or len(g0['currentCycle']) == 0:
+        if len(g80['currentCycle']) < 500  or len(g0['currentCycle']) <500 :
             runs_with_weird_stuff += 1
             return
     except Exception as e :
         runs_with_weird_stuff += 1
+        weird_runs.append(data[r])
         return
     slowdown = g80['currentCycle'][last_idx]/g0['currentCycle'][last_idx]
 
@@ -2921,8 +4603,8 @@ def simple_instruction_slowdown(data,r):
         d['cost_inst_MLP_abs'] = np.append(d['cost_inst_MLP_abs'], np.sum(i['stallCyclesMLPLoad'][indexes]/inside_factor) )
         d['cost_inst_stall_time'] = np.append(d['cost_inst_stall_time'], np.sum(i['stallTime'][indexes]/inside_factor) / cycles_elapsed)
         d['cost_inst_L3stall_time'] = np.append(d['cost_inst_L3stall_time'], np.sum(i['L3stallTime'][indexes]/inside_factor) / cycles_elapsed)
-        d['cost_inst_L3MLP'] = np.append(d['cost_inst_L3MLP'], np.sum(i['L3stallCyclesMLPLoad'][indexes]/inside_factor) / (cycles_elapsed*1024))
-        d['cost_inst_MLP'] = np.append(d['cost_inst_MLP'], np.sum(i['stallCyclesMLPLoad'][indexes]/inside_factor) / (cycles_elapsed*1024))
+        d['cost_inst_L3MLP'] = np.append(d['cost_inst_L3MLP'], np.sum(i['L3stallCyclesMLPLoad'][indexes]/inside_factor) / (cycles_elapsed*MLP_PRECISION_FACTOR))
+        d['cost_inst_MLP'] = np.append(d['cost_inst_MLP'], np.sum(i['stallCyclesMLPLoad'][indexes]/inside_factor) / (cycles_elapsed*MLP_PRECISION_FACTOR))
 
 
         d['average_mlp_middle'] = np.append(d['average_mlp_middle'], np.sum(i['L3MLP_load_at_middle'][indexes]) / cycles_elapsed)
@@ -2990,7 +4672,7 @@ def simple_slow_sown(data,r):
     for m in merged_together:
         # winsorize 1% of the data
         #import scipy.stats as stats
-        slowlyyy = stats.mstats.winsorize(slowlyyy, limits=[0.01, 0.01])
+        #slowlyyy = stats.mstats.winsorize(slowlyyy, limits=[0.01, 0.01])
         metricc = g0[m][:last_idx]
         if (slowlyyy.shape[0] == 0 or metricc.shape[0] == 0):
             continue
@@ -3033,11 +4715,44 @@ def plot_merged():
         plt.savefig(f'{FIGS_FOLDER}/gen/global/acc_pmu_{k}.png')
         plt.close()
 
-iterate_over_benches(data, simple_instruction_slowdown)
-print("runs_with_weird_stuff", runs_with_weird_stuff)
+
+"""
+iterate_over_benches(data, obtain_weights)
 exit(0)
+print("obtained")
+iterate_over_benches(data, do_cdf_of_instructions)
+exit(0)
+for b in by_binary_weights:
+    # merge the metrics obtained
+    metricas_numpy = {}
+    all_instructions = ((i for i in by_binary_weights[b][a] for a in range(len(by_binary_weights[b]))))
+    all_instructions = np.unique(all_instructions)
+    for m in list(by_binary_weights[b][0].items())[0].keys():
+        metricas_numpy[m] = np.zeros(len(all_instructions))
+        for i in range(len(all_instructions)):
+            metricas_numpy[m][i] = by_binary_weights[b][m][i]
+    for m in by_binary_weights[b]:
+
+        if m in metricas_numpy:
+            metricas_numpy[m] = np.append(metricas_numpy[m], by_binary_weights[b][m])
+        else:
+            metricas_numpy[m] = by_binary_weights[b][m]
+
+    by_binary_weights[b].append(metricas_numpy)
+
+    serialize_weights(by_binary_weights[b])
+"""
+
+#print("success_run", success_run)
+#exit(0)
 #iterate_over_benches(data, simple_slow_sown)
-print("runs_with_weird_stuff", runs_with_weird_stuff)
+##iterate_over_benches(data, simple_instruction_slowdown)
+#print("runs_with_weird_stuff", runs_with_weird_stuff)
+#for weird_run in weird_runs:
+    #print(weird_run['0']['line'], end="")
+#exit(0)
+#print("runs_with_weird_stuff", runs_with_weird_stuff)
+"""
 plot_merged()
 exit(0)
 do_important_plots(data)
@@ -3049,6 +4764,7 @@ iterate_over_benches(data, iterate_time_series)
 
 print("runs_with_weird_stuff", runs_with_weird_stuff)
 exit(0)
+"""
 #exit(0)
 
 def learn(inputs,results):
@@ -3114,10 +4830,10 @@ def load_cached_results():
         global_learn['inputs'] = np.load(f'{FIGS_FOLDER}/gen/global/inputs.npy')
         global_learn['results'] = np.load(f'{FIGS_FOLDER}/gen/global/results.npy')
 
-exit(0)
-print("did derivates")
-#plot_global_results()
-print("did global")
+#exit(0)
+#print("did derivates")
+
+#print("did global")
 
 failed_to_correlate_idxs = []
 i = 0
@@ -3220,6 +4936,326 @@ e_count=0
 bench_runs =0
 
 #glob_sum = []
+
+def about_to_solve(data):
+    def sol(data, r):
+        if data[r]['0']['pid'] == 7040:
+            print(data[r]['0']['bench'])
+            bench = data[r]['0']['bench'].split("/")[-1]
+
+    iterate_over_benches(data, sol)
+    
+a = 1.0155768028621026
+b = -0.2562029379967975
+#all_benches_data = np.array()
+#l3_dudes = []
+#pred_slow = []
+def predict_soar_by_inst():
+    global RUN_DATA_FOLDER
+    global run_meta
+    RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/results_gem5"
+    run_meta=f"{RUN_DATA_FOLDER}/gem5_pids.txt"
+    def bc_bench(data,r):
+        a = 1.0155768028621026
+        b = -0.2562029379967975
+
+        bench = data[r]['0']['bench'].split("/")[-1]
+        if bench != "XSBench":
+            return
+        runnr = data[r]['0']['benchnr']
+            
+        print(bench, runnr)
+        # pid
+        pid = data[r]['0']['pid']
+        print(pid)
+        g = load_global_fields(data, r)
+        i = load_inst_fields(data, r)
+        try:
+            v = "totalTime"
+        except:
+            return
+        print(v, np.histogram(i[v]))
+        print('nicerunnrrunnr')
+        for v in ['average_l3mlp', 'average_mlp',  'totalTime','stallTime']:
+            print(v, np.histogram(i[v]))
+        print('nicerunnrrunnr')
+        print('nicerunnrrunnr')
+        print('nicerunnrrunnr')
+        
+
+        #print(np.unique(i['average_l3mlp']))
+        #return
+        #print('survie')
+        
+        #print(np.unique(i['L3MLP_load_at_end']))
+        #print(np.histogram(i['L3MLP_load_at_end']))
+        #return
+        predict = []
+
+        print(len(g['currentCycle']))
+
+        #last_idx = 100000 # int(len(g['currentCycle'])/1000)
+
+        
+        #i['stalledCycles'] / (i['totalTime']*a + b* i['L3MLP'])
+        variables = {}
+        #last_idx = len(g['currentCycle'])
+        if len(g['currentCycle']) < 500:
+            return
+        last_idx = len(g['currentCycle'])-1
+        AOL = (g['cyclesWithMemrequests'][1] - g['cyclesWithMemrequests'][last_idx])/( g['commitedLoads'][last_idx] - g['commitedLoads'][1] )
+        #AOL = np.where(g['commitedLoads'][1:last_idx] == 0, 1, AOL) 
+
+        #predicted_slow_down = (g['stalledCycles'][1:last_idx]/g['currentCycle'][1:last_idx]) * 1/(a + b/AOL)
+        diff_stalls = g['stalledCycles'][last_idx] - g['stalledCycles'][0]
+        diff_cycles = g['currentCycle'][last_idx] - g['currentCycle'][0]
+        predicted_slow_down = diff_stalls/diff_cycles * 1/(a + b/AOL)
+        #print( g['currentCycle'][g['currentCycle'] > 0]  , '11the death of me...')
+        #print("stalledCycles", np.histogram(g['stalledCycles'][1:last_idx]))
+        #print("currentCycle", np.histogram(g['currentCycle'][1:last_idx]))
+        #print("AOL", np.histogram(AOL))
+
+        def obtain_soar_instt(selections, L3_MLP, L3_stall, acess_time, real):
+            import numpy as np
+            from scipy.optimize import curve_fit
+
+            def fit_func(r, a, b):
+
+                # A,B -0.4477149036453043 0.1349315011644008
+                #soar_metric = i['stallTime'][sel] /  ( i['L3MLP_load_at_middle'][sel] * b  + a * i['totalTime'][sel] ) 
+                #print('ho')
+                return L3_stall /  (a*L3_MLP + b * acess_time)
+                #for i in range(len(selection)):
+                #    results[i] = np.sum( 
+                #print('hi')
+                #return results
+
+            print('whhhhhhhh')
+            initial_guess = [10, 0.5]
+            popt, pcov = curve_fit(fit_func, np.array(range((1))), real, p0=initial_guess, maxfev=1000)
+            a_opt, b_opt = popt
+            a_err, b_err = np.sqrt(np.diag(pcov))
+            fitted_real = fit_func(L3_stall, a_opt, b_opt)
+            print('done')
+
+            residuals = real - fitted_real
+            ss_res = np.sum(residuals**2)
+            ss_tot = np.sum((real - np.mean(real))**2)
+            r_squared = 1 - ss_res / ss_tot
+            rmse = np.sqrt(np.mean((real - fitted_real) ** 2))
+            regress_error.append(rmse)
+            print(f'MSRE-S {rmse:.3f}')
+            return [fitted_real, a_opt, b_opt, rmse]
+        #print("predicted_slow_down", np.histogram(predicted_slow_down))
+
+
+        #print(np.histogram(l['L3stallCyclesMLPLoad'][l3_idx]), 'jooo')
+
+        bench = pid #r['bench'].split("/")[-1]
+        #err = np.sum(abs(predicted_slow_down - g['real_slowdown']))/len(predicted_slow_down)
+        #print(bench, err)
+            
+
+        print('about to fit')
+        predicted_slow_down = np.array(predicted_slow_down) 
+        fitted, a, b, rmse = obtain_soar_instt(i['average_l3mlp'] < 255 , i['average_mlp'], i['stallTime'], i['totalTime'], predicted_slow_down)
+        print("A,B",a,b,rmse)
+        
+            
+        for j in range(1,last_idx): # https://www.perplexity.ai/search/do-the-average-of-88-470097-15-P6_EPLrkR6iELQv1z4dxZg
+            idxs = ( i['start_cycle'] < g['currentCycle'][j] ) & ( i['start_cycle'] < g['currentCycle'][j] )
+            _ = (i['totalTime'][idxs]*a + b* i['L3MLP_load_at_end'][idxs])
+            #_ = np.where(_ == 0, 1, _)
+            predict.append(np.sum(i['stallTime'][idxs] / _))
+
+        plt.figure()
+        plt.scatter( predicted_slow_down, predict)
+        plt.xlabel('Real Slowdown')
+        plt.ylabel('Fitted Real Slowdown')
+        plt.title('Real Slowdown vs Fitted Real Slowdown')
+        plt.savefig(f'{FIGS_FOLDER}/gen/_inst_to_global/{bench}.png')
+        plt.close()
+    
+
+
+
+    data = load_bench_data()
+        
+    #data = load_bench_data_pids()
+    iterate_over_benches(data, bc_bench)
+    exit(0)
+
+all_moment = {}
+def collect_one_metric(data,r, convolve=1):
+        bad = {}
+        g = load_global_fields(data, r, convolve=convolve)
+        g80 = load_global_fields(data, r,'80', convolve=convolve)
+        variables = {}
+        last_idx = get_last_idx_of_smallest_vector(g80['currentCycle'],g['currentCycle'])
+        if last_idx < 500:
+            return
+        AOL = g['cyclesWithMemrequests'][1:last_idx]/g['commitedLoads'][1:last_idx]
+        AOL = np.where(g['commitedLoads'][1:last_idx] == 0, 0, AOL) 
+        AOL_l3 = g['L3cyclesWithMemrequests'][1:last_idx]/g['commitedLoads'][1:last_idx]
+        AOL_l3 = np.where(g['commitedLoads'][1:last_idx] == 0, 0, AOL_l3) 
+
+        slow_down = (g80['currentCycle'][1:last_idx]-g['currentCycle'][1:last_idx]) /g['currentCycle'][1:last_idx]
+        #slow_down = g['stalledCycles'][1:last_idx]/g['currentCycle'][1:last_idx]
+        #print(slow_down)
+
+        for key in global_types: 
+            try:
+                variables[key] = g[key][1:last_idx]
+            except:
+                bad[key] = True
+            
+        variables['aol'] = AOL
+        variables['aol_l3'] = AOL_l3
+        variables['real_slowdown'] = slow_down
+        return variables
+
+def calc_soar_slowdown(d,idxs):
+    a = 1.0155768028621026
+    b = -0.2562029379967975
+    fitted_real = d['stalledCycles'][idxs]/d['currentCycle'][idxs] * (a + b/d['aol'][idxs])
+    return fitted_real
+
+def plot_muetricas(data, r):
+    convolve = 1
+    all_moment = collect_one_metric(data, r, convolve)
+    bench = data[r]['0']['bench'].split("/")[-1]
+    os.makedirs(f"{FIGS_FOLDER}/gen/_metricas/{bench}", exist_ok=True)
+
+    idxs = np.where(all_moment['real_slowdown'] > 0.1)
+    fitted_real = all_moment['stalledCycles'][idxs]/all_moment['currentCycle'][idxs] * (a + b/all_moment['aol'][idxs])
+    #fitted_real = obtain_soar_mlp_aware_slowdown(all_moment['stalledCycles'][idxs]/all_moment['currentCycle'][idxs], all_moment['aol'][idxs], all_moment['real_slowdown'][idxs])
+    fitted_real_l3 = all_moment['L3stalledCycles'][idxs]/all_moment['currentCycle'][idxs] * (a + b/all_moment['aol_l3'][idxs])
+    # obtain_soar_mlp_aware_slowdown(all_moment['L3stalledCycles'][idxs]/all_moment['currentCycle'][idxs], all_moment['aol_l3'][idxs], all_moment['real_slowdown'][idxs])
+    ms = ['L3onlyLoadsStalled', 'L3stallCyclesMLPLoad', 'commitedLoads', 'stallCyclesMLPLoad', 'L3stalledCycles']
+
+    # remove all datapoints where all_moment['real_slowdown'] < 0.01
+    for m in ms:
+        print(m)
+        fitted= regress(all_moment[m][idxs], all_moment['real_slowdown'][idxs])
+        plt.figure(figsize=(30, 30))
+        plt.scatter(all_moment['real_slowdown'][idxs], fitted)
+        plt.xlabel('Real Slowdown')
+        plt.ylabel(m)
+        plt.title('Real Slowdown vs ' + m)
+        plt.savefig(f'{FIGS_FOLDER}/gen/_metricas/{bench}/{m}_{convolve}.png')
+        plt.close()
+
+
+    plt.figure(figsize=(30, 30))
+    plt.scatter(all_moment['real_slowdown'][idxs], fitted_real)
+    plt.xlabel('Real Slowdown')
+    plt.ylabel('Fitted Real Slowdown')
+    plt.title('Real Slowdown vs Fitted Real Slowdown')
+    plt.savefig(f'{FIGS_FOLDER}/gen/_metricas/{bench}/soar_{convolve}.png')
+    plt.close()
+def by_bench_muetricas():
+    iterate_over_benches(data, plot_muetricas)
+
+def get_metrics_from_all_by_moment():
+    global all_moments
+    bad = {}
+    convolve=1
+    def get_all(data,r):
+        g = load_global_fields(data, r, convolve=convolve)
+        g80 = load_global_fields(data, r,'80', convolve=convolve)
+        variables = {}
+        last_idx = get_last_idx_of_smallest_vector(g80['currentCycle'],g['currentCycle'])
+        if last_idx < 500:
+            return
+        AOL = g['cyclesWithMemrequests'][1:last_idx]/g['commitedLoads'][1:last_idx]
+        AOL = np.where(g['commitedLoads'][1:last_idx] == 0, 0, AOL) 
+        AOL_l3 = g['L3cyclesWithMemrequests'][1:last_idx]/g['commitedLoads'][1:last_idx]
+        AOL_l3 = np.where(g['commitedLoads'][1:last_idx] == 0, 0, AOL_l3) 
+
+        slow_down = (g80['currentCycle'][1:last_idx]-g['currentCycle'][1:last_idx]) /g['currentCycle'][1:last_idx]
+        #slow_down = g['stalledCycles'][1:last_idx]/g['currentCycle'][1:last_idx]
+        #print(slow_down)
+
+        for key in global_types: 
+            try:
+                variables[key] = g[key][1:last_idx]
+            except:
+                bad[key] = True
+            
+        variables['aol'] = AOL
+        variables['aol_l3'] = AOL_l3
+
+
+        for k in global_types:
+            if k in bad or k not in variables:
+                continue
+            if k not in all_moment:
+                all_moment[k] = []
+            all_moment[k].append(variables[k])
+        if 'real_slowdown' not in all_moment or 'aol' not in all_moment:
+            all_moment['real_slowdown'] = []
+            all_moment['aol'] = []
+            all_moment['aol_l3'] = []
+        all_moment['real_slowdown'].append(slow_down)
+        all_moment['aol'].append(AOL)
+        all_moment['aol_l3'].append(AOL_l3)
+    iterate_over_benches(data, get_all)
+    for k in all_moment:
+        if k in bad:
+            continue
+        all_moment[k] = np.concatenate(all_moment[k])
+    
+    for k in all_moment:
+        print(f"{k}: {len(all_moment[k])} entries")
+    for k in bad:
+        print(f"{k}: {bad[k]} ", end=" ")
+
+    idxs = np.where(all_moment['real_slowdown'] > 0.1)
+    fitted_real = obtain_soar_mlp_aware_slowdown(all_moment['stalledCycles'][idxs]/all_moment['currentCycle'][idxs], all_moment['aol'][idxs], all_moment['real_slowdown'][idxs])
+    fitted_real_l3 = obtain_soar_mlp_aware_slowdown(all_moment['L3stalledCycles'][idxs]/all_moment['currentCycle'][idxs], all_moment['aol_l3'][idxs], all_moment['real_slowdown'][idxs])
+    ms = ['commitedL3Misses', 'L3onlyLoadsStalled', 'L3stallCyclesMLPLoad', 'commitedLoads', 'stallCyclesMLPLoad', 'L3stalledCycles']
+
+    # remove all datapoints where all_moment['real_slowdown'] < 0.01
+    for m in ms:
+        print(m)
+        fitted= regress(all_moment[m][idxs], all_moment['real_slowdown'][idxs])
+        plt.figure(figsize=(30, 30))
+        plt.scatter(all_moment['real_slowdown'][idxs], fitted)
+        plt.xlabel('Real Slowdown')
+        plt.ylabel(m)
+        plt.title('Real Slowdown vs ' + m)
+        plt.savefig(f'{FIGS_FOLDER}/gen/_metrica/{m}_{convolve}.png')
+        plt.close()
+
+
+    plt.figure(figsize=(30, 30))
+    plt.scatter(all_moment['real_slowdown'][idxs], fitted_real)
+    plt.xlabel('Real Slowdown')
+    plt.ylabel('Fitted Real Slowdown')
+    plt.title('Real Slowdown vs Fitted Real Slowdown')
+    plt.savefig(f'{FIGS_FOLDER}/gen/all_moment_errors_{convolve}.png')
+    plt.close()
+    exit(0)
+
+    for m in  ['stalledCycles', 'currentCycle', 'stallCyclesMLPLoad', 'totalTime', 'L3stallTime', 'L3stallCyclesMLPLoad']:
+        try:
+            plt.figure(figsize=(30, 30))
+            plt.scatter(all_moment['real_slowdown'], all_moment[m])
+            plt.xlabel('Real Slowdown')
+            plt.ylabel(  m)
+            plt.title('Real Slowdown vs Fitted Real Slowdown')
+            plt.savefig(f'{FIGS_FOLDER}/gen/_metrica/{m}.png')
+            plt.close()
+        except Exception as e:
+            print(f"Failed to plot {m}: {e}")
+            pass
+    #for m in ['mlp']
+    #fitted, a, b, rmse = obtain_soar_inst(all_moment['selections'], all_moment[mlp], all_moment['L3stallTime'],all_moment['totalTime'], all_moment['actual_slowdown'])
+    #print("A,B",a,b)
+    #print('ho')
+    
+    
+
 def aggregate_all_benchmarks(data,r):
                 global e_count
                 global bench_runs
@@ -3260,6 +5296,10 @@ def aggregate_all_benchmarks(data,r):
                     #variables.append(('commitedLoads', get_last('commitedLoads')))
                     variables.append(('percentStallCycles', GOT_o('stalledCycles')/final_cycles))
                     variables.append(('aol', AOL))
+                    # ADDEDDDDDDDDD
+                    variables.append(
+                    ('cycles',get_field(data[r]['0'], GLOBAL,'currentCycle', np.uint64))
+                    )
 
                     # deep copy
                     a =  {'real_slowdown': np.array([]), 'stall_cycles': np.array([]), 'mlp_stall': np.array([]), 'load+commit': np.array([]), 'cycles': np.array([]),
@@ -3302,14 +5342,164 @@ def aggregate_all_benchmarks(data,r):
                     for var_name, var_value in variables:
                         global_results[var_name].append(var_value)        ##################### 
                     bench_runs+=1
+                    #print("rrrrrrrrrrrrrrruu")
+                    #print(global_results['stall_cycles'])
                 except Exception as e:
-                    print("Error", e,e_count, bench_runs)
-                    e_count+=1
-                    pass # do not add this bench to the list
+                    raise e
+                    #print("Error", e,e_count, bench_runs)
+                    #e_count+=1
+                    #pass # do not add this bench to the list
 
 
 
-iterate_over_benches(data, aggregate_all_benchmarks)
+def combine_plots(folder):
+    folder = f"{FIGS_FOLDER}/gen/mlp_stalls"
+    files = os.listdir(folder)
+    files = [f for f in files if f.endswith('.png')]
+    files = sorted(files)
+    # join all in a single image 
+    a = int(np.sqrt(len(files)))+1
+    b = int(np.sqrt(len(files)))+1
+    fig, ax = plt.subplots(a, b, figsize=(10, 10))
+    for i, file in enumerate(files):
+        img = plt.imread(os.path.join(folder, file))
+        ax[i//b][i%b].imshow(img)
+        ax[i//b][i%b].axis('off')
+    plt.savefig(os.path.join(folder, 'combined.png'), bbox_inches='tight', pad_inches=0)
+
+def plot_histogram(data, r):
+    ag80 =  load_aggregate_fields(data,r,'80')
+    ag0 =  load_aggregate_fields(data,r)
+    fields = aggregate_types.keys()
+    data, bins=20
+    #l3_idx = 
+    for v in fields:
+        plt.figure()
+        print("Doing v", v)
+        plt.hist(data[v][l3_idx]/data['count'][l3_idx], bins=bins)
+        plt.xlabel(v)
+        plt.ylabel('Frequency (normalized)')
+        plt.title(f'Histogram of {v}')
+        plt.savefig(f"{FIGS_FOLDER}/gen/vars/histogram_{v}_{bench_name}_{bench_nr}.png", dpi=300)
+        plt.close()
+                            
+def plot_access_time_is_not_enough(data, r):
+
+    bench_name = get_bname(data,r)
+    bench_nr = get_bnr(data, r)
+    for (ag0,ag80, name) in ((load_aggregate_fields(data,r) ,load_aggregate_fields(data,r,'80'), 'AGG'),):
+        unique_accessBrackets = np.unique(ag0['accessBracket'])
+        access_times = {}
+        # !!! different selections for 0 and 80
+        # - ignore L3 hits
+        # - and tlb misses
+        # - IGNORE STORES!
+        for ab in unique_accessBrackets:
+            sel = (ag0['accessBracket'] == ab) & (ag0['count'] > 0) & (ag0['totalTime'] > 0)
+            sel80 = (ag80['accessBracket'] == ab) & (ag80['count'] > 0) & (ag80['totalTime'] > 0)
+            avg_factor = ag0['count'][sel].sum()
+            access_times[ab] = {}
+            access_times[ab]['totalTime'] = 0
+            access_times[ab]['stallTime'] = 0
+            access_times[ab]['activeCycles'] = 0
+            access_times[ab]['activeCycles%'] = 0
+            access_times[ab]['stallTime%'] = 0
+            access_times[ab]['count'] = 0
+            access_times[ab]['increaseStall'] = 0
+            if avg_factor == 0:
+                continue
+            access_times[ab]['count'] = ag0['count'][sel].sum()
+            access_times[ab]['totalTime'] = (ag0['totalTime'][sel]* ag0['count'][sel]).sum()/avg_factor
+            access_times[ab]['stallTime'] = (ag0['stallTime'][sel]* ag0['count'][sel]).sum()/avg_factor
+
+            a = ag0
+            f = (a['totalTime'][sel]* a['count'][sel]).sum() #/ avg_factor
+
+            a = ag80
+            s = (a['stallTime'][sel80]* a['count'][sel80]).sum() #/ a['count'][sel].sum()
+            access_times[ab]['increaseStall'] = np.subtract(s,f, dtype=np.int64)
+            # print total time and stall time
+            #print("Total time", access_times[ab]['totalTime'])
+            ##print("Stall time", access_times[ab]['stallTime'])
+            # mode PERCENTAGE OF STALL CYCLES, if not linear increase ....
+            # absolute
+            access_times[ab]['activeCycles'] = (access_times[ab]['totalTime'] - access_times[ab]['stallTime']) #/access_times[ab]['totalTime']
+            access_times[ab]['activeCycles%'] = (access_times[ab]['totalTime'] - access_times[ab]['stallTime'])/access_times[ab]['totalTime']
+            access_times[ab]['stallTime%'] = (access_times[ab]['stallTime'])/access_times[ab]['totalTime']
+
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
+        
+        # Subplot 1: Stall cycles increase
+        ax1.bar(unique_accessBrackets*16, 
+                [access_times[ab]['increaseStall'] for ab in unique_accessBrackets],
+                width=15,
+                )
+        ax1.legend()
+        ax1.set_title(f'Slow tier\'s stall cycles increase by latency {r}')
+        
+        # Subplot 2: Distribution of accesses
+        v=  np.array([access_times[ab]['count'] for ab in unique_accessBrackets])
+        final =                100*v/v.sum()
+        ax2.bar(unique_accessBrackets*16, 
+                final,
+                width=15,
+                label='Number of accesses')
+        max_val = np.max(final)
+        for i in range(len(unique_accessBrackets)):
+            if final[i] > max_val:
+                ax2.text(unique_accessBrackets[i]*16+7, final[i], f"{int(final[i])}%", ha='center', va='bottom')
+        ax2.set_ylim(0,np.max(final[3:])*1.1)
+        print(v)
+        ax2.legend()
+        ax2.set_title(f'Distribution of accesses by latency {r}')
+        
+        # Subplot 3: Active and stall time histogram
+        ax3.bar(unique_accessBrackets*16, 
+                [access_times[ab]['activeCycles'] for ab in unique_accessBrackets],
+                width=15,
+                label='activeCycles')
+        ax3.bar(unique_accessBrackets*16, 
+                [access_times[ab]['stallTime'] for ab in unique_accessBrackets], 
+                bottom=[access_times[ab]['activeCycles'] for ab in unique_accessBrackets],
+                width=15,
+                label='stallTime')
+        ax3.legend()
+        ax3.set_title(f'Histogram of cycles of active and stall time  for {human[r]}')
+        
+        # Subplot 4: Percentage of active and stall time
+        ax4.bar(unique_accessBrackets*16, [access_times[ab]['activeCycles%'] for ab in unique_accessBrackets], 
+                width=15,
+                label='activeCycles')
+        ax4.bar(unique_accessBrackets*16, [access_times[ab]['stallTime%'] for ab in unique_accessBrackets], 
+                bottom=[access_times[ab]['activeCycles%'] for ab in unique_accessBrackets], 
+                width=15,
+                label='stallTime')
+        ax4.legend()
+        ax4.set_ylabel("Percentage")
+        ax4.set_xlabel("Access latency")
+        ax4.set_title(f'Histogram of percentage of active and stall time for each instruction for {human[r]}')
+        
+        plt.tight_layout()
+        plt.savefig(f"{FIGS_FOLDER}/gen/aggregate/combined_plots_{bench_name}_{bench_nr}_{r}_{name}.png", dpi=300)
+        plt.close()
+
+#iterate_over_benches(data, aggregate_all_benchmarks)
+#plot_global_results()
+
+
+import sys
+
+arg0 = sys.argv[1]
+
+if arg0 == "iterate_over_benches":
+    function = eval(sys.argv[2])
+    iterate_over_benches(data, function)
+else:
+    print("evaling", " ".join(sys.argv[1:]))
+    eval(" ".join(sys.argv[1:]))
+#  ./report/images/load_images.sh 'pdo plot_my_soar()'
+
+exit(0)
 correlate_all()
 
 
@@ -3339,22 +5529,7 @@ plot_global_sample_cost()
 
 print(len(data.keys()))
 
-def combine_plots(folder):
-    folder = f"{FIGS_FOLDER}/gen/mlp_stalls"
-    files = os.listdir(folder)
-    files = [f for f in files if f.endswith('.png')]
-    files = sorted(files)
-    # join all in a single image 
-    a = int(np.sqrt(len(files)))+1
-    b = int(np.sqrt(len(files)))+1
-    fig, ax = plt.subplots(a, b, figsize=(10, 10))
-    for i, file in enumerate(files):
-        img = plt.imread(os.path.join(folder, file))
-        ax[i//b][i%b].imshow(img)
-        ax[i//b][i%b].axis('off')
-    plt.savefig(os.path.join(folder, 'combined.png'), bbox_inches='tight', pad_inches=0)
+
+
 
 combine_plots('j')
-
-
-
