@@ -76,8 +76,63 @@ struct FinalMetrics{
     fclose(file);\
     ;
 
+    struct FinalMetrics{
+    //uint64_tI accessedMemory;
+    uint64_t address;
+    uint16_t totalTime;
+    uint16_t stallTime;
+    uint16_t L3stallTime;
+    uint16_t lastStallTime;
+    uint32_t stallCyclesMLPBoth;
+    uint32_t stallCyclesMLPLoad;
+    uint32_t stallCyclesMLPStore;
+    uint32_t L3stallCyclesMLPLoad;
 
+    uint8_t MLP_store_at_start;
+    uint8_t MLP_store_at_end;
+    uint8_t MLP_load_at_start;
+    uint8_t MLP_load_at_end;
+
+    uint8_t L3MLP_store_at_start;
+    uint8_t L3MLP_store_at_middle;
+    uint8_t L3MLP_store_at_end;
+    uint8_t L3MLP_load_at_start;
+    uint8_t L3MLP_load_at_middle;
+    uint8_t L3MLP_load_at_end;
+    uint8_t isMicroop;
+    uint8_t tlb_miss;
+    uint8_t isLoad;
+    uint8_t isStore;
+    uint8_t average_l3mlp;
+    uint8_t average_mlp;
+
+    uint64_t start_cycle;
+};
+
+
+struct InstructionData {
+       uint64_t address;
+    uint64_t count;
+    uint64_t stallTime;
+    uint64_t L3stallTime;
+    uint64_t totalTime;
+    uint64_t lastStallTime;
+    uint64_t L3MLP_load_at_end;
+    uint64_t MLP_load_at_end;
+    uint64_t MLP_store_at_end;
+    uint64_t L3MLP_store_at_end;
+    uint64_t L3MLP_store_at_middle;
+    uint64_t L3MLP_load_at_middle;
+    uint64_t stallCyclesMLPLoad;
+    uint64_t L3stallCyclesMLPLoad;
+    uint64_t stallCyclesMLPStore;
+    uint64_t stallCyclesMLPBoth;
+    uint8_t accessBracket;
+    bool tlbMiss;
+};
+/*
 struct FinalMetrics{
+     uint64_t accessedMemory = 0; 
     uint64_t address;
     uint16_t totalTime ;
     uint16_t stallTime ;
@@ -111,6 +166,7 @@ struct FinalMetrics{
 
     uint64_t start_cycle ; // at EA
 };
+*/
 
 /*
 struct FinalMetrics{
@@ -173,29 +229,68 @@ struct GlobalStatsss{
 };
 */
 
-struct InstructionData {
-       uint64_t address;
-    uint64_t count;
-    uint64_t stallTime;
-    uint64_t L3stallTime;
-    uint64_t totalTime;
-    uint64_t lastStallTime;
-    uint64_t L3MLP_load_at_end;
-    uint64_t MLP_load_at_end;
-    uint64_t MLP_store_at_end;
-    uint64_t L3MLP_store_at_end;
-    uint64_t L3MLP_store_at_middle;
-    uint64_t L3MLP_load_at_middle;
+struct GlobalStatsss{
+
+    uint64_t totalStalledCyclesSummed; 
+    uint64_t totalL3StalledCyclesSummed; 
+    uint64_t totalL3MLPStalledCyclesSummed; 
+    uint64_t totalMLPStalledCyclesSummed; 
+
+    uint64_t totalL3MLPsummed;
+    uint64_t totalMLPsummed;
+    uint64_t totalAccessTimeSummed; 
+    uint64_t totalL3AccessTimeSummed; 
+    uint64_t commitedL3Misses; 
+     uint64_t totalL3MLP_D_TotalAccessTimeSummed; 
+     uint64_t totalL3_D_TotalAccessTimeSummed;  // L333 stalls 
+     uint64_t totalMLPStalledCycles_D_TimeSummed;
+
+    uint64_t totalL3StallSummed; 
+
+
     uint64_t stallCyclesMLPLoad;
-    uint64_t L3stallCyclesMLPLoad;
     uint64_t stallCyclesMLPStore;
     uint64_t stallCyclesMLPBoth;
-    uint8_t accessBracket;
-    bool tlbMiss;
+    uint64_t stalledCycles;
+    uint64_t stalledCyclesDuringStore;
+    uint64_t stalledCyclesWithMemRequests;
+    uint64_t stalledCyclesWithStores;
+    uint64_t cyclesWithMemrequests; // the diff between 2 = A1 of SOAR
+    uint64_t commitedStores;
+    //uint64_t commitedL3Loads;  // The dif betweeen 2 = A2
+    uint64_t commitedLoads;  // The dif betweeen 2 = A2
+    uint64_t commitedAtomic;
+    uint64_t commitedInstructions;
+    uint64_t totalSquashed;
+    uint64_t lastStallTime;
+    uint64_t currentCycle;
+    uint64_t loadCountByLatency[16];
+    uint64_t tlbMisses;
+
+    uint64_t onlyLoadsStalled;
+    uint64_t onlyStoresStalled;
+    uint64_t L3onlyLoadsStalled;
+    uint64_t L3onlyStoresStalled;
+
+    uint64_t L3stallCyclesMLPLoad;
+    uint64_t L3stallCyclesMLPStore;
+    uint64_t L3stallCyclesMLPBoth;
+    uint64_t L3stalledCycles;
+    uint64_t L3stalledCyclesDuringStore;
+    uint64_t L3cyclesWithMemrequests; // the diff between 2 = A1 of SOAR
+
 };
 
-
+/*
 struct GlobalStatsss{
+
+    uint64_t totalL3StallSummed; 
+    uint64_t totalAccessTimeSummed ; 
+        uint64_t totalL3AccessTimeSummed ; 
+        uint64_t commitedL3Misses ; 
+         uint64_t totalL3MLP_D_TotalAccessTimeSummed ; 
+         uint64_t totalL3_D_TotalAccessTimeSummed  ; // L333 stalls 
+         uint64_t totalMLPStalledCycles_D_TimeSummed ;
 
     uint64_t totalStalledCyclesSummed;
     uint64_t totalL3StalledCyclesSummed;
@@ -234,13 +329,13 @@ struct GlobalStatsss{
 
 };
 
+    uint8_t tlb_miss;
+    uint8_t isLoad;
+    uint8_t isStore;
 
-/*
-struct InstructionData {
-    uint32_t count ;
-    uint64_t stallTime ;
-    uint64_t totalTime ;
-    uint64_t lastStallTime ;
+    uint64_t start_cycle;
+};
+ ;
     uint64_t stallCyclesMLPLoad ;
     uint64_t stallCyclesMLPStore ;
     uint64_t stallCyclesMLPBoth ;
@@ -446,10 +541,9 @@ void split_structs_to_files(int run_number){
 
 
     SPLIT_STRUCT_STAT_FIELDS(instruction_data, lastStallTime, uint16_t   );
-    SPLIT_STRUCT_STAT_FIELDS(instruction_data, stallCyclesMLPLoad, uint64_t   );
+    SPLIT_STRUCT_STAT_FIELDS(instruction_data, stallCyclesMLPLoad, uint32_t   );
     SPLIT_STRUCT_STAT_FIELDS(instruction_data,  stallCyclesMLPStore, uint64_t   );
 
-    SPLIT_STRUCT_STAT_FIELDS(instruction_data, lastStallTime, uint16_t   );
     SPLIT_STRUCT_STAT_FIELDS(instruction_data, L3stallCyclesMLPLoad, uint64_t   );
 
     //SPLIT_STRUCT_STAT_FIELDS(instruction_data,  L3stallCyclesMLPStore, uint64_t   );
@@ -460,6 +554,7 @@ void split_structs_to_files(int run_number){
     SPLIT_STRUCT_STAT_FIELDS(instruction_data, MLP_store_at_end, uint8_t   );
     SPLIT_STRUCT_STAT_FIELDS(instruction_data, MLP_load_at_start, uint8_t   );
     SPLIT_STRUCT_STAT_FIELDS(instruction_data, MLP_load_at_end, uint8_t   );
+
 
     SPLIT_STRUCT_STAT_FIELDS(instruction_data, L3MLP_store_at_start, uint8_t   );
     SPLIT_STRUCT_STAT_FIELDS(instruction_data, L3MLP_store_at_end, uint8_t   );
@@ -472,6 +567,9 @@ void split_structs_to_files(int run_number){
     SPLIT_STRUCT_STAT_FIELDS(instruction_data, isLoad, uint8_t   );
     SPLIT_STRUCT_STAT_FIELDS(instruction_data, isStore, uint8_t   );
 
+
+    SPLIT_STRUCT_STAT_FIELDS(instruction_data, average_l3mlp, uint8_t   );
+    SPLIT_STRUCT_STAT_FIELDS(instruction_data, average_mlp, uint8_t   );
 
     
     

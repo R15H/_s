@@ -1,5 +1,4 @@
 #!/bin/bash
-gcc sample_parser.c -O3 -o sample_parser
 
 results_folder="/mnt/nas/inesc/ist196723/osdi26/results_gem5"
 
@@ -13,8 +12,14 @@ parse_gem5_output(){
 
 
     ./sample_parser $results_folder/global_$pid* $results_folder/inst_$pid* $results_folder/aggregate_$pid*
+    echo - 
+    grep $pid $results_folder/gem5_pids.txt
 }
 export -f parse_gem5_output
-cat $results_folder/gem5_pids.txt | awk '{print $2}' | uniq | while read pid; do parse_gem5_output $pid; done
+go(){
+gcc sample_parser.c -O3 -o sample_parser
+	cat $results_folder/gem5_pids.txt | awk '{print $2}' | uniq | xargs -I {} -P 20 /mnt/nas/inesc/ist196723/osdi26/bin/parse.sh parse_gem5_output {} # while read pid; do parse_gem5_output $pid; done
+}
+"$@"
 
 

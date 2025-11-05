@@ -6,37 +6,98 @@ MLP_PRECISION_FACTOR = 1024
 
 from scipy import stats
 
+OLD_V4 = True
+
 def plot_r():
     # real results of sy
     folder="/mnt/nas/inesc/ist196723/latency_benchmark/tests_syn/plot_time_math"
     #file="TIREDbig_final_results"
     file="final_synthethic_tiering"
+    file="syn_ftw"
 
     system = []
     time = []
     arand = []
     aptr = []
     ratio = []
-    with open(os.path.join(folder, file), 'r') as f:
-        lines = f.readlines()
-        sy_results = {}
-        for line in lines:
-            v = line.split(" ")
-            if len(v) < 6:
-                continue
-            system.append(v[-1])
-            time.append(float(v[0]))
-            arand.append(int(v[2]))
-            aptr.append(int(v[1]))
-            ratio.append(v[-2])
-    ratio = np.array(ratio)
-    arand = np.array(arand)
-    aptr = np.array(aptr)
-    time = np.array(time)
-    system = np.array(system)
+    dram = []
+
+    bench = "cg.D"
+    other_benchmode = False
+    other_benchmode = True
+    if other_benchmode:
+        file="TIREDbig_final_results"
+        file="promising_results"
+        nr_args = 6
+
+    
+    def do_plot(bench_file, nr_args, bench_name, other_bench=False):
+
+        with open(os.path.join(folder, file), 'r') as f:
+            lines = f.readlines()
+            sy_results = {}
+            for line in lines:
+                v = line.split(" ")
+                if other_benchmode:
+                    if bench not in v:
+                        continue
+                    if len(v) < nr_args:
+                        continue
+                else:
+                    if len(v) < 6:
+                        continue
+                time.append(float(v[0]))
+                system.append(v[4])
+                if other_benchmode:
+                    #bench in v and not 
+                    dram.append(int(v[2]))
+                else:
+                    arand.append(int(v[2]))
+                    aptr.append(int(v[1]))
+                    ratio.append(v[-2])
+        ratio = np.array(ratio)
+        arand = np.array(arand)
+        aptr = np.array(aptr)
+        time = np.array(time)
+        system = np.array(system)
+        if other_benchmode:
+            dram = np.array(dram)
+            def other_plot(bench):
+                plt.figure()
+                plt.title(bench +  " performance by DRAM")
+                plt.xlabel("DRAM")
+                plt.ylabel("Execution time")
+                DRAMS = np.unique(dram)
+                xticks = []
+                xticks_labels = []
+                for i in range(len(DRAMS)):
+                    o = i*0.1
+                    idx = dram == DRAMS[i]
+                    print(system)
+                    idx_mem = (system[idx] == "0\n") | (system[idx] == "0")
+                    idx_asm = (system[idx] == "4\n") | (system[idx] == "4") #plt.bar("MEMTIS", np.mean(time[])) #plt.bar("AsMem", np.mean(time[]))
+                    plt.bar(i+o, np.mean(time[idx][idx_mem]), width=0.5, color="blue")
+                    plt.bar(i+o+0.5, np.mean(time[idx][idx_asm]), width=0.5, color="orange")
+                    xticks.append(i+o+0.25)
+                    xticks_labels.append(str(DRAMS[i]))
+
+                from matplotlib.lines import Line2D
+                color_handles = [
+                    Line2D([0], [0],  color='blue', label='MEMTIS'),
+                    Line2D([0], [0],  color='orange', label='AsMem'),
+                ]
+                all_handles = color_handles
+                plt.legend(handles=all_handles, loc='best', bbox_to_anchor=(1, 1))
+                plt.xticks(xticks, xticks_labels)
+                plt.savefig(f"{FIGS_FOLDER}/../report/{bench}_drams_{file}.png")
+                plt.close()
+            other_plot(bench)
+            return
+
 
     for r in np.unique(ratio):
         idx = ratio == r
+        print("Doing ratio R",r)
         plt.figure()
         plt.title(f"Performance by ratio {r}")
         plt.xlabel("Number of sequential reads")
@@ -85,20 +146,23 @@ def plot_r():
 
         # Show legend with all handles
         plt.legend(handles=all_handles, loc='best')
-        plt.title(f"MEMTIS and AsMem performance with {r} higher sequential reads")
+        plt.title(f"Performance with {r}x more sequential reads")
         plt.savefig(f"{FIGS_FOLDER}/../report/ratio_{r}.png")
     
 
 
 def plot_sy():
-    categories = ["All CXL", "Pessimal Static Allocation", "CXL DS", "Optimal Static Allocation", "All DRAM"]
-    values = [1.842, 1.719, 1.700, 1.006, 1.000 ]
+    categories = ["All CXL", "Pessimal Alloc", "Optimal Alloc", "All DRAM"]
+    values = [1.842, 1.719, 1.006, 1.000 ] # "CXL DS"  1.700,
     plt.figure()
     plt.title("Performance by static allocation")
-    plt.xlabel("Allocation mode")
+    plt.xlabel("Static allocation mode")
     plt.ylabel("Norm Perf")
-    plt.bar(categories, values)
+    plt.bar(categories, values, color='grey')
+    #plt.xticks(categories,roddtation=45)
     plt.ylim(0.5,2)
+
+
     plt.savefig(f"{FIGS_FOLDER}/../report/static_alloc_synth.png")
 
     
@@ -107,16 +171,31 @@ def plot_sy():
     files={
         "inst_weights": "inst_weights",
         "acc_time_weights": "acc_time_weights",
-        "mlp_weight_weights": "mlp_weight_weights",
+        #"mlp_weight_weights": "mlp_weight_weights",
         "stall_cycles_weights": "stall_weights",
         "by_mlp_avg_weights": "by_mlp_avg_weights",
         "arand" : "arand_",
         "aptr" : "aptr_",
     }
+
+
     values = {}
+    values80 = {}
     for k,v in files.items():
         values[k] = np.loadtxt(f"{folder}/{v}")
-        print(k, len(values[k]))
+        if k not in ['arand', 'aptr']:
+            values80[k] = np.loadtxt(f"{folder}/{v}80")
+            
+            print(len(values[k]), len(values80[k]))
+            print(k, np.mean(values80[k]), np.mean(values[k]))
+
+    SELECTED_INPUTS_FEW=True
+    if SELECTED_INPUTS_FEW:
+        for k in values:
+            values[k] = values[k][:10]
+        for k in values80:
+            values80[k] = values80[k][:10]
+
 
     plt.figure()
     plt.title("Instruction weights in function of inputs")
@@ -125,25 +204,37 @@ def plot_sy():
     insts_unique = np.unique(values['inst_weights'])
 
     streams =  np.unique(values['arand'])
+    DO_DIFF=False
     for o in [1]:
-        idx = values['arand'] > 0 #  s
+        if SELECTED_INPUTS_FEW:
+            continue
+        idx = values['arand'] >= 0 #  LOOOOOOOOOOOOOOOST HOURS had > instead of >= . which took out an element. then, later, another array that should have the same size did not ! because it did not go through this index!
 
 
         mask_X = [inst == insts_unique[0] for inst in values['inst_weights'][idx]]
-        mask_O = [not cond for cond in mask_X]
+        mask_O = [inst == insts_unique[1] for inst in values['inst_weights'][idx]]
+        #mask_O = [not cond for cond in mask_X]
+        if not DO_DIFF:
+            diff = np.zeros(len(values['arand'][idx][mask_X]))
 
-        plt.scatter(np.array(values['arand'])[idx][mask_X], np.array(values['acc_time_weights'])[idx][mask_X], 
+        diff = diff if not DO_DIFF else np.array(values80['acc_time_weights'])[idx][mask_X]
+        plt.scatter(np.array(values['arand'])[idx][mask_X],  np.abs(diff - np.array(values['acc_time_weights'] )[idx][mask_X]), 
                     label='Access time Stream', marker='X', color="blue")
-        plt.scatter(np.array(values['arand'])[idx][mask_O], np.array(values['acc_time_weights'])[idx][mask_O], 
+        diff = diff if not DO_DIFF else np.array(values80['acc_time_weights'])[idx][mask_O]
+        plt.scatter(np.array(values['arand'])[idx][mask_O], np.abs(diff - np.array(values['acc_time_weights'])[idx][mask_O]), 
                     label='Access time Pointer Chase', marker='o', color="blue")
         
-        plt.scatter(np.array(values['arand'])[idx][mask_X], np.array(values['stall_cycles_weights'])[idx][mask_X], 
+        diff = diff if not DO_DIFF else np.array(values80['stall_cycles_weights'])[idx][mask_X]
+        plt.scatter(np.array(values['arand'])[idx][mask_X], np.abs(diff - np.array(values['stall_cycles_weights'])[idx][mask_X]), 
                     label='Stall cycles Stream', marker='X', color="orange")
-        plt.scatter(np.array(values['arand'])[idx][mask_O], np.array(values['stall_cycles_weights'])[idx][mask_O], 
+        diff = diff if not DO_DIFF else np.array(values80['stall_cycles_weights'])[idx][mask_O]
+        plt.scatter(np.array(values['arand'])[idx][mask_O], np.abs(diff - np.array(values['stall_cycles_weights'])[idx][mask_O]), 
                     label='Stall cycles Pointer Chase', marker='o', color="orange")
-        plt.scatter(np.array(values['arand'])[idx][mask_X], np.array(values['by_mlp_avg_weights'])[idx][mask_X], 
+        diff = diff if not DO_DIFF else np.array(values80['by_mlp_avg_weights'])[idx][mask_X]
+        plt.scatter(np.array(values['arand'])[idx][mask_X], np.abs(diff - np.array(values['by_mlp_avg_weights'])[idx][mask_X]), 
                     label='Stall cycles/MLP Stream', marker='X', color="green")
-        plt.scatter(np.array(values['arand'])[idx][mask_O], np.array(values['by_mlp_avg_weights'])[idx][mask_O], 
+        diff = diff if not DO_DIFF else np.array(values80['by_mlp_avg_weights'])[idx][mask_O]
+        plt.scatter(np.array(values['arand'])[idx][mask_O], np.abs(diff - np.array(values['by_mlp_avg_weights'])[idx][mask_O]), 
                     label='Stall cycles/MLP Pointer Chase', marker='o', color="green")
         # marker legent
         #plt.legend(handles=[Line2D([0], [0], marker='x', color='w', label='MU'), Line2D([0], [0], marker='o', color='w', label='inst')])
@@ -172,15 +263,16 @@ def plot_sy():
         all_handles = marker_handles + color_handles
 
         # Show legend with all handles
-        plt.legend(handles=all_handles, loc='best', bbox_to_anchor=(1, 1))
+        plt.legend(handles=all_handles, loc='best')
         # tight layout
-        plt.tight_layout()
+        #plt.tight_layout()
 
         # plt.legend()
         s="1"
-        plt.savefig(f"{FIGS_FOLDER}/../report/{fname}_{s}.png")
+        plt.savefig(f"{FIGS_FOLDER}/../report/{fname}___{s}.png")
 
         
+        #values80['inst_weights']  == 
         plt.figure()
         plt.title("Weight proportion between Pointer Chase and Streaming Reads")
         plt.bar("Access time", np.mean(values['acc_time_weights'][mask_O])/np.mean(values['acc_time_weights'][mask_X]), color="grey")
@@ -188,6 +280,95 @@ def plot_sy():
         plt.bar("Stall cycles", np.mean(values['stall_cycles_weights'][mask_O])/np.mean(values['stall_cycles_weights'][mask_X]), color="grey")
         plt.bar("Iteration time", 13, color="grey")
         plt.savefig(f"{FIGS_FOLDER}/../report/{fname}_proportion.png")
+
+        plt.figure()
+        plt.title("Slow tier metrics")
+        """
+        print(values80['acc_time_weights'][idx]) print(len(values80['acc_time_weights']), len(values['acc_time_weights'])) print(values80['acc_time_weights'][-10:]) print(values['acc_time_weights'][-10:]) print(values80['acc_time_weights'][:10]) print(values['acc_time_weights'][:10]) print(len(idx), sum(idx),"boool dude") 
+        """ 
+        mask_X80 = [inst == insts_unique[0] for inst in values80['inst_weights']]
+        mask_O80 = [inst == insts_unique[1] for inst in values80['inst_weights']]
+        #mask_O80 = [not cond for cond in mask_X80]
+
+        plt.bar("Access time", (np.mean(values80['acc_time_weights'][mask_O80]) - np.mean(values['acc_time_weights'][mask_O]))/(np.mean(values80['acc_time_weights'][mask_X80]) - np.mean(values['acc_time_weights'][mask_X])), color="grey")
+        print("Access time", (np.mean(values80['acc_time_weights'][mask_O80]) - np.mean(values['acc_time_weights'][mask_O]))/(np.mean(values80['acc_time_weights'][mask_X80]) - np.mean(values['acc_time_weights'][mask_X])))
+        #print("Access time", np.mean(values80['acc_time_weights'][mask_O80]) - np.mean(values['acc_time_weights'][mask_O]), np.mean(values80['acc_time_weights'][mask_X80]) - np.mean(values['acc_time_weights'][mask_X]))
+        plt.bar("Stall cycles/MLP", (np.mean(values80['by_mlp_avg_weights'][mask_O80]) - np.mean(values['by_mlp_avg_weights'][mask_O]))/(np.mean(values80['by_mlp_avg_weights'][mask_X80]) - np.mean(values['by_mlp_avg_weights'][mask_X])), color="grey")
+        print("Stall cycles/MLP", (np.mean(values80['by_mlp_avg_weights'][mask_O80]) - np.mean(values['by_mlp_avg_weights'][mask_O]))/(np.mean(values80['by_mlp_avg_weights'][mask_X80]) - np.mean(values['by_mlp_avg_weights'][mask_X])))
+        #print("Stall cycles/MLP", (np.mean(values80['by_mlp_avg_weights'][mask_O80]) - np.mean(values['by_mlp_avg_weights'][mask_O])) (np.mean(values80['by_mlp_avg_weights'][mask_X80]) - np.mean(values['by_mlp_avg_weights'][mask_X])))
+        plt.bar("Stall cycles", (np.mean(values80['stall_cycles_weights'][mask_O80]) - np.mean(values['stall_cycles_weights'][mask_O]))/(np.mean(values80['stall_cycles_weights'][mask_X80]) - np.mean(values['stall_cycles_weights'][mask_X])), color="grey")
+        print("Stall cycles", (np.mean(values80['stall_cycles_weights'][mask_O80]) - np.mean(values['stall_cycles_weights'][mask_O]))/(np.mean(values80['stall_cycles_weights'][mask_X80]) - np.mean(values['stall_cycles_weights'][mask_X])))
+        #print("Stall cycles", np.mean(values80['stall_cycles_weights'][mask_O80]) - np.mean(values['stall_cycles_weights'][mask_O]), np.mean(values80['stall_cycles_weights'][mask_X80]) - np.mean(values['stall_cycles_weights'][mask_X]))
+        ##plt.bar("Slow down", 13, color="grey")
+        plt.xlabel("Metric")
+        plt.ylabel("Increase")
+        plt.savefig(f"{FIGS_FOLDER}/../report/{fname}_diff_proportion.png")
+        
+        plt.figure()
+        plt.title("Metric increase in slow tier")
+        """
+        print(values80['acc_time_weights'][idx]) print(len(values80['acc_time_weights']), len(values['acc_time_weights'])) print(values80['acc_time_weights'][-10:]) print(values['acc_time_weights'][-10:]) print(values80['acc_time_weights'][:10]) print(values['acc_time_weights'][:10]) print(len(idx), sum(idx),"boool dude") 
+        """ 
+        mask_X80 = [inst == insts_unique[0] for inst in values80['inst_weights']]
+        mask_O80 = [inst == insts_unique[1] for inst in values80['inst_weights']]
+        #mask_O80 = [not cond for cond in mask_X80]
+
+        i=0
+        ticks = []
+        labels = []
+        spacing=0.12
+        ptr_color = "blue"
+        seq_color = "orange"
+        i+=spacing
+        w=0.5
+        plt.bar(i, (np.mean(values80['acc_time_weights'][mask_O80]) - np.mean(values['acc_time_weights'][mask_O])), width=w, color=ptr_color)
+        i+=0.5
+        ticks.append(i-w/2)
+        labels.append("Access time")
+        plt.bar(i, (np.mean(values80['acc_time_weights'][mask_X80]) - np.mean(values['acc_time_weights'][mask_X])), width=w, color=seq_color)
+        #tick
+        """
+
+        "Access time Ptr"
+        "Access Time Seq"
+        """
+        print("Access time", (np.mean(values80['acc_time_weights'][mask_O80]) - np.mean(values['acc_time_weights'][mask_O]))/(np.mean(values80['acc_time_weights'][mask_X80]) - np.mean(values['acc_time_weights'][mask_X])))
+        #print("Access time", np.mean(values80['acc_time_weights'][mask_O80]) - np.mean(values['acc_time_weights'][mask_O]), np.mean(values80['acc_time_weights'][mask_X80]) - np.mean(values['acc_time_weights'][mask_X]))
+
+        
+
+        i+=w+spacing
+        plt.bar(i, (np.mean(values80['stall_cycles_weights'][mask_O80]) - np.mean(values['stall_cycles_weights'][mask_O])), width=w, color=ptr_color)
+        i+=0.5
+        ticks.append(i-w/2)
+        labels.append("Stall cycles")
+        plt.bar(i, (np.mean(values80['stall_cycles_weights'][mask_X80]) - np.mean(values['stall_cycles_weights'][mask_X])), width=w, color=seq_color)
+
+        
+
+        print("Stall cycles/MLP", (np.mean(values80['by_mlp_avg_weights'][mask_O80]) - np.mean(values['by_mlp_avg_weights'][mask_O]))/(np.mean(values80['by_mlp_avg_weights'][mask_X80]) - np.mean(values['by_mlp_avg_weights'][mask_X])))
+        #print("Stall cycles/MLP", (np.mean(values80['by_mlp_avg_weights'][mask_O80]) - np.mean(values['by_mlp_avg_weights'][mask_O])) (np.mean(values80['by_mlp_avg_weights'][mask_X80]) - np.mean(values['by_mlp_avg_weights'][mask_X])))
+        i+=w+spacing
+
+        plt.bar(i, (np.mean(values80['by_mlp_avg_weights'][mask_O80]) - np.mean(values['by_mlp_avg_weights'][mask_O])), width=w, color=ptr_color)
+        #"Stall cycles/MLP Seq"
+        i+=0.5
+        ticks.append(i-w/2)
+        labels.append("Stall cycles/MLP")
+        plt.bar(i, (np.mean(values80['by_mlp_avg_weights'][mask_X80]) - np.mean(values['by_mlp_avg_weights'][mask_X])), width=w, color=seq_color)
+
+        
+        
+
+        print("Stall cycles", (np.mean(values80['stall_cycles_weights'][mask_O80]) - np.mean(values['stall_cycles_weights'][mask_O]))/(np.mean(values80['stall_cycles_weights'][mask_X80]) - np.mean(values['stall_cycles_weights'][mask_X])))
+        #print("Stall cycles", np.mean(values80['stall_cycles_weights'][mask_O80]) - np.mean(values['stall_cycles_weights'][mask_O]), np.mean(values80['stall_cycles_weights'][mask_X80]) - np.mean(values['stall_cycles_weights'][mask_X]))
+        ##plt.bar("Slow down", 13, color="grey")
+        plt.xticks(ticks, labels)
+        plt.legend(["Pointer Chase", "Stream read"])
+        plt.xlabel("Metric")
+        plt.savefig(f"{FIGS_FOLDER}/../report/{fname}_diff_ptr_seq_proportion.png")
+        
+        
 
 
     
@@ -197,14 +378,24 @@ def plot_sy():
 
 
 def simple_weight():
+    global run_meta
+    global DATA_FOLDER
+    if OLD_V4:
+        RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/v4/results_gem5"
+        #RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/results_gem5"
+        run_meta=f"{RUN_DATA_FOLDER}/gem5_pids.txt"
+    ONLY_SYN=False
+
     def simp(data,r):
+        EIGHT_MODE=False
         i = load_inst_fields(data, r)
-        # i80 = load_inst_fields(data, r, '80') <--- THIS WAS MAKING IT SKIP!
+        if EIGHT_MODE:
+            i = load_inst_fields(data, r, '80')   # i80 = ... instead of i = ... <--------- HOURS LOST !
         benchset = data[r]['0']['benchset']
         print(benchset)
         print('benchname', data[r]['0']['bench'].split("/")[-1], data[r]['0']['benchnr'])
         print(benchset)
-        if "synth" not in benchset:
+        if "synth" not in benchset and ONLY_SYN:
             return
         print("------------------")
 
@@ -231,11 +422,16 @@ def simple_weight():
         inst_priority = []
         import math 
         for addr in uniq_add:
-            sel = i['address'] == addr 
+            sel = i['address'] == addr # & i['totalTime']  != 0
             j+=1
             mlp_by_mean = int(np.mean(i['stallTime'][sel]/(i['average_mlp'][sel]+1)))
             # int(np.mean(i['average_mlp'][sel])), "--->", 
-            out += str(addr) + " " + str(int(np.mean(i['totalTime'][sel]))) + " " + str(int(np.mean(i['stallTime'][sel]))) + " " + str(int(np.mean(i['stallCyclesMLPLoad'][sel])))  + " " + str(mlp_by_mean) + "\n"
+
+            hyper = i['stallTime'][sel] - (i['totalTime'][sel] - i['stallTime'][sel])
+            hyper = max(0, hyper)
+            hyper_thread_weight = int(np.mean((hyper) /(i['average_mlp'][sel]+1))) # aka 2x stall time - total time
+            hyper_thread_no_mlp = int(np.mean((hyper))) # aka 2x stall time - total time
+            out += str(addr) + " " + str(int(np.mean(i['totalTime'][sel]))) + " " + str(int(np.mean(i['stallTime'][sel]))) + " " + str(int(np.mean(i['stallCyclesMLPLoad'][sel])))  + " " + str(mlp_by_mean) + " " + str(hyper_thread_weight) + " " + str(hyper_thread_no_mlp) + "\n"
             mlp = int(np.mean(i['stallCyclesMLPLoad'][sel]))
             ints_1.append(mlp_by_mean)
             ints_2.append(int(mlp_by_mean/2))
@@ -247,15 +443,21 @@ def simple_weight():
 
         
         bench = data[r]['0']['bench'].split("/")[-1]
-        with open(f"{FIGS_FOLDER}/maps/{benchset}-{bench}", "w") as f:
-            f.write(out)
+        extra = ""
+        extra += "_80" if EIGHT_MODE else ""
+        if OLD_V4:
+            extra += "_v4"
+        fname=f"{FIGS_FOLDER}/maps/{benchset}-{bench}{extra}"
+        with open(fname, "w") as f:
+                print(fname)
+                f.write(out)
         if "syn" in benchset:
             header = (str(3) + " ") * 10 
             a = out.split("\n")
             a.insert(1, "0 0 0 0 0 0 0")
             a[0] = header
             out = "\n".join(a)
-            with open(f"{FIGS_FOLDER}/maps/igstart-{benchset}-{bench}", "w") as f:
+            with open(f"{FIGS_FOLDER}/maps/igstart{('80' if EIGHT_MODE else '')}-{benchset}-{bench}" , "w") as f:
                 f.write(out)
         return
         
@@ -278,6 +480,7 @@ def simple_weight():
         with open(f"{FIGS_FOLDER}/compressed_3/{bench}", "w") as f:
             f.write(do_compressed(inst_priority, uniq_add)) # keep same priority
 
+    data = load_bench_data()
 
     iterate_over_benches(data, simp)
 
@@ -536,6 +739,8 @@ def my_soar(data,r):   # CHANGE TO NP MEAN
         b = -0.2562029379967975
         soar_slowdown =  (g0['stalledCycles'][cycle_nr]/g0['currentCycle'][cycle_nr]) * 1/(a + b/aol)
         vectors.setdefault('soar_slowdown', []).append(soar_slowdown)
+        vectors.setdefault('llc_count', []).append(len(i['totalTime'][sel]))
+        #return
         t = i['totalTime'][sel]
         vectors.setdefault('totalTime', []).append(np.sum(t))               # CHANGE TO NP MEAN
         s = i['stallTime'][sel]
