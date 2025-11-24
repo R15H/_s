@@ -73,6 +73,13 @@ def cdf_inst():
         plt.close()
         """
 
+
+
+"""
+AsMem/MEMtis  promising_results_16_LAST_FINAL
+
+"""
+
         
 def plot_r():
     global time, system, arand, aptr, ratio, dram
@@ -96,14 +103,23 @@ def plot_r():
         nr_args = 6
 
     
+
+
     def do_plot(bench_file, nr_args, bench_name, other_bench=False):
-        global time, system, arand, aptr, ratio, dram
+        global time, system, arand, aptr, ratio, dram, benched
         system = []
         time = []
         arand = []
         aptr = []
         ratio = []
         dram = []
+        benched = []
+
+        def parse_all_results(line_array):
+            if len(line_array ) < 5:
+                return
+            
+            
 
         with open(os.path.join(folder, bench_file), 'r') as f:
             lines = f.readlines()
@@ -116,33 +132,78 @@ def plot_r():
                     if len(v) < nr_args:
                         continue
                 else:
-                    if len(v) < 6:
-                        continue
-                time.append(float(v[0]))
-                
+                    if "ALL" in v[-1] and len(v) == 5:
+                        pass
+                    else:
+                        if len(v) < 6:
+                            continue
+                TIME = 0
+                time.append(float(v[TIME]))
                 print(v)
-
-                if LAST_SYN:
-                    system.append(v[5])
-                    dram.append(int(v[3]))
+                if "all_results" in bench_file:
+                    DRAM=2
+                    SYSTEM=3
+                    BENCHED=5
+                    if "|" in v:
+                        BENCHED=6
+                    try:
+                        metric = int(v[2]) # this is the system name instead of a FOM
+                    except:
+                        continue
+                    try:
+                        system.append(v[SYSTEM])
+                        dram.append(v[DRAM])
+                        benched.append(v[BENCHED])
+                    except:
+                        print(v)
+                        print("ERROR")
+                        exit(0)
+                    continue
                 else:
-                    system.append(v[4])
+                    DRAM=3
+                    SYSTEM=5
+                #print(v)
+
+                    if bench_name == "JOINED":
+                        if "TPP" in v[3]:
+                            system.append(v[3])
+                            dram.append(int(v[2]))
+                            benched.append(v[6].split("/")[-1])
+                            continue
+                        else:
+                            benched.append(v[3])
+                            dram.append(int(v[2]))
+                            system.append(v[6])
+                            continue
+
+                    if LAST_SYN:
+                        if "ALL" in v[-1]: 
+                            system.append(v[-1])
+                            dram.append(0)
+                        else:
+                            system.append(v[5])
+                            dram.append(int(v[3]))
+                    else:
+                        system.append(v[4])
 
 
-                if other_benchmode:
-                    #bench in v and not 
-                    dram.append(int(v[2]))
-                else:
-                    arand.append(int(v[2]))
-                    aptr.append(int(v[1]))
-                    ratio.append(v[-2])
+                    if other_benchmode:
+                        #bench in v and not 
+                        dram.append(int(v[2]))
+                    else:
+                        arand.append(int(v[2]))
+                        aptr.append(int(v[1]))
+                        ratio.append(v[-2])
         ratio = np.array(ratio)
         arand = np.array(arand)
         aptr = np.array(aptr)
         time = np.array(time)
         system = np.array(system)
         dram = np.array(dram)
-        if other_benchmode:
+        benched = np.array(benched)
+        bench = "bc"
+        bench = 'mg.C'
+        if other_benchmode or bench_name == "JOINED":
             dram = np.array(dram)
             def other_plot(bench):
                 plt.figure()
@@ -152,42 +213,89 @@ def plot_r():
                 DRAMS = np.unique(dram)
                 xticks = []
                 xticks_labels = []
+                    
                 for i in range(len(DRAMS)):
-                    o = i*0.1
+                    o = i*2
                     idx = dram == DRAMS[i]
                     print(system)
-                    if LAST_SYN:
-                        idx_mem = (system[idx] == "MEMTIS\n") | (system[idx] == "MEMTIS")
-                        idx_asm = (system[idx] == "AsMem\n") | (system[idx] == "AsMem") #plt.bar("MEMTIS", np.mean(time[])) #plt.bar("AsMem", np.mean(time[]))
+
+                    if bench_name == "JOINED":
+                        bench_sel = 'kron.sg__-i4_-n5' == benched[idx] 
+                        bench_sel = 'kron.sg__-i4_-n5' in benched[idx] 
+                        bench_sel = 'mg.C' == benched[idx] 
+                        print("iiiiiiiiiiiiiii")
+                        #print(benched[idx])
+                        #print(system[idx])
+                        idx_mem = (((system[idx] == "MEMTIS-1"  ) ) & bench_sel)
+                        idx_asm = ((( system[idx] == "ASMEM"  ) ) & bench_sel )#plt.bar("MEMTIS", np.mean(time[])) #plt.bar("AsMem", np.mean(time[]))
+                        idx_tpp = ((( system[idx] == "TPP"  ) ) & bench_sel )#plt.bar("MEMTIS", np.mean(time[])) #plt.bar("AsMem", np.mean(time[]))
+                        idx_tpp_alto = ((( system[idx] == "TPP-ALTO"  ) ) & bench_sel )#plt.bar("MEMTIS", np.mean(time[])) #plt.bar("AsMem", np.mean(time[]))
+                        #idx_mem = ((("MEMTIS" in system[idx] ) | (system[idx] == "MEMTIS")) & bench_sel)
+                        #idx_asm = ((("ASMEM" in system[idx] ) | (system[idx] == "AsMem")) & bench_sel )#plt.bar("MEMTIS", np.mean(time[])) #plt.bar("AsMem", np.mean(time[]))
+                        print(system[idx][idx_mem])
+                        print(system[idx][idx_asm])
+
                     else:
-                        idx_mem = (system[idx] == "0\n") | (system[idx] == "0")
-                        idx_asm = (system[idx] == "4\n") | (system[idx] == "4") #plt.bar("MEMTIS", np.mean(time[])) #plt.bar("AsMem", np.mean(time[]))
+                        bench_sel = system[idx] != 'LKASDJALISKDJ'
+                        if LAST_SYN:
+                            idx_mem = (((system[idx] == "MEMTIS\n") | (system[idx] == "MEMTIS")) & bench_sel)
+                            idx_asm = (((system[idx] == "AsMem\n") | (system[idx] == "AsMem")) & bench_sel )#plt.bar("MEMTIS", np.mean(time[])) #plt.bar("AsMem", np.mean(time[]))
+                        else:
+                            idx_mem = (((system[idx] == "0\n") | (system[idx] == "0")) & bench_sel) 
+                            idx_asm = (((system[idx] == "4\n") | (system[idx] == "4")) & bench_sel) #plt.bar("MEMTIS", np.mean(time[])) #plt.bar("AsMem", np.mean(time[]))
                     plt.bar(i+o, np.mean(time[idx][idx_mem]), width=0.5, color="blue")
                     plt.bar(i+o+0.5, np.mean(time[idx][idx_asm]), width=0.5, color="orange")
-                    xticks.append(i+o+0.25)
+                    print("time")
+                    print(time[idx][idx_tpp])
+                    print(time[idx][idx_tpp_alto])
+                    
+                    plt.bar(i+o+1, np.minimum(500,  np.mean(time[idx][idx_tpp])), width=0.5, color="red")
+                    plt.bar(i+o+1.5, np.minimum(500, np.mean(time[idx][idx_tpp_alto])), width=0.5, color="green")
+
+                    idx_all_fast = (((system[idx] == "ALL_FAST\n") | (system[idx] == "ALL_FAST")) & bench_sel)
+                    idx_all_slow = (((system[idx] == "ALL_SLOW\n") | (system[idx] == "ALL_SLOW")) & bench_sel)
+                    plt.bar(i+o+2, np.minimum(500, np.mean(time[idx][idx_all_fast])), width=0.5, color="purple")
+                    plt.bar(i+o+2.5, np.minimum(500, np.mean(time[idx][idx_all_slow])), width=0.5, color="grey")
+                    xticks.append(i+o+0.5)
                     xticks_labels.append(str(DRAMS[i]))
 
                 from matplotlib.lines import Line2D
                 color_handles = [
                     Line2D([0], [0],  color='blue', label='MEMTIS'),
                     Line2D([0], [0],  color='orange', label='AsMem'),
+                    Line2D([0], [0],  color='grey', label='Slow tier only'),
+                    Line2D([0], [0],  color='purple', label='Fast tier only'),
+
+                    Line2D([0], [0],  color='red', label='TPP'),
+                    Line2D([0], [0],  color='green', label='TPP-ALTO'),
                 ]
                 all_handles = color_handles
-                plt.legend(handles=all_handles, loc='best', bbox_to_anchor=(1, 1))
+                plt.legend(handles=all_handles, loc='best') #, bbox_to_anchor=(1, 1))
                 plt.xticks(xticks, xticks_labels)
                 extra = ""
                 if LAST_SYN:
                     extra = "last_sy_"
+                if bench_name == "JOINED":
+                    extra = "joined_"
                 plt.savefig(f"{FIGS_FOLDER}/../report/{extra}{bench}_drams_{bench_file}{extra}.png")
                 plt.close()
+                exit(0)
             other_plot(bench)
             return
 
+    #do_plot("__", 5, "JOINED", False)
     LAST_SYN=True
     if LAST_SYN:
         file="syn_ftw_f_2_please_back_NOW_RIGHT"
     nr_args = 4
     bench = "SYNTHETHIC"
+    
+    file = "/mnt/nas/inesc/ist196723/all_results"
+    do_plot(file, nr_args, bench, False)
+    print(system, dram)
+    return
+
+    file = "syn_ftw_f_2_please_back_NOW_RIGHT_QQ"
     do_plot(file, nr_args, bench, False)
     """
     return
@@ -210,6 +318,80 @@ def plot_r():
 
     do_plot(file, nr_args, bench, False)
     """
+    for r in np.unique(aptr):
+        idx = aptr == r
+        print("Doing aptr R",r)
+        plt.figure()
+        print(time[idx])
+        plt.title(f"Performance by pointer chasins {r}")
+        plt.xlabel("Number of streaming reads")
+        plt.ylabel("Average execution time")
+        print(system[idx])
+        #print(time[idx])
+        # one idx per aptr
+        # half index per system
+        arands = np.unique(arand[idx])
+        idx_sort = np.argsort(arands)
+        #aptrs = np.sort(aptrs)
+        #print("ARAND", current_arand)
+
+        xticks = []
+        xticks_labels = []
+        for i in range(len(arands)):
+            current_arand = arands[idx_sort][i]
+            
+            DRAM_USED=190
+            #print(dram, idx)
+            idx_mem = (arand[idx] == current_arand) & (system[idx] == "MEMTIS-1-1\n") & (dram[idx] == DRAM_USED) #(dram[idx] == 320)
+            idx_asm = (arand[idx] == current_arand) & (system[idx] == "ASMEM\n") & (dram[idx] == DRAM_USED) #(dram[idx] == 320)
+
+            idx_all_fast = ( arand[idx] == current_arand) & ((system[idx] == "ALL_FAST\n") | (system[idx] == "ALL_FAST"))
+            idx_all_slow = ( arand[idx] == current_arand) & (((system[idx] == "ALL_SLOW\n") | (system[idx] == "ALL_SLOW"))) 
+
+            baseline_fast = np.mean(time[idx][idx_all_fast])
+            baseline_fast = np.mean(time[idx][idx_all_slow])
+            o = i*1.1
+
+            print("----------")
+            print(len(time[idx][idx_mem]))
+            print(len(time[idx][idx_asm]))
+            print("----------")
+            plt.bar(i+o, np.mean(time[idx][idx_mem])/baseline_fast, width=0.5, color="blue")
+            plt.bar(i+o+0.5, np.mean(time[idx][idx_asm])/baseline_fast, width=0.5, color="orange")
+            xticks.append(i+o+0.25)
+            xticks_labels.append(str(current_arand))
+
+            print(time[idx][idx_all_fast])
+            v = np.mean(time[idx][idx_all_fast])/baseline_fast
+            print(v)
+            plt.bar(i+o+1, v, width=0.5, color="purple")
+            v = np.mean(time[idx][idx_all_slow])/baseline_fast
+            print(v)
+            plt.bar(i+o+1.5, v, width=0.5, color="yellow")
+            print('cry')
+        plt.xticks(xticks, xticks_labels)
+            #plt.bar(i+0.25, 0, width=0, bottom=str(aptrs[i]))
+
+            #plt.bar(system[idx][i] + aptr[idx][i], time[idx][i], label="Time")
+            #plt.bar(system[idx][i], aptr[idx][i], bottom=time[idx][i], label="Ptr")
+
+        from matplotlib.lines import Line2D
+
+        # Color legend handles
+        color_handles = [
+            Line2D([0], [0],  color='blue', label='MEMTIS'),
+            Line2D([0], [0],  color='orange', label='AsMem'),
+        ]
+
+        # Combine marker and color handles
+        all_handles =  color_handles
+
+        # Show legend with all handles
+        plt.legend(handles=all_handles, loc='best')
+        plt.title(f"Performance with {r} pointer chasings")
+        plt.savefig(f"{FIGS_FOLDER}/../report/aptr_{r}.png")
+    
+    return
     print(ratio)
     for r in np.unique(ratio):
         idx = ratio == r
@@ -226,6 +408,8 @@ def plot_r():
         idx_sort = np.argsort(aptrs)
         #aptrs = np.sort(aptrs)
 
+        print('be happy')
+        exit(0)
         xticks = []
         xticks_labels = []
         for i in range(len(aptrs)):
@@ -244,6 +428,14 @@ def plot_r():
             plt.bar(i+o+0.5, np.mean(time[idx][idx_asm]), width=0.5, color="orange")
             xticks.append(i+o+0.25)
             xticks_labels.append(str(current_aptr))
+
+            idx_all_fast = (((system[idx] == "ALL_FAST\n") | (system[idx] == "ALL_FAST")) & dram[idx] == 230)
+            idx_all_slow = (((system[idx] == "ALL_SLOW\n") | (system[idx] == "ALL_SLOW")) & dram[idx] == 230)
+            plt.bar(i+o+0.5, np.minimum(500, np.mean(time[idx][idx_all_fast])), width=0.5, color="purple")
+            plt.bar(i+o+0.75, np.minimum(500, np.mean(time[idx][idx_all_slow])), width=0.5, color="yellow")
+            #i+= 0.75
+            
+
         plt.xticks(xticks, xticks_labels)
             #plt.bar(i+0.25, 0, width=0, bottom=str(aptrs[i]))
 
@@ -581,6 +773,7 @@ def plot_synthethic():
     
         
 
+
 """
 python3 bin/python_parser.py "simple_weight()"
 """
@@ -603,12 +796,24 @@ def simple_weight():
     ONLY_SYN=False
 
     MULTI=True
+    TARGET_BIN = None
+    TARGET_BIN = "cg.D"
     #MULTI=False
     if MULTI:
         RESULT_FOLDER="multi"
     def simp(data,r):
         global writes
         EIGHT_MODE=False
+        this_binary = data[r]['0']['bench'].split("/")[-1]
+        if TARGET_BIN and TARGET_BIN not in this_binary:
+            return
+        benchset = data[r]['0']['benchset']
+        if benchset != "npb_result-iter":
+            print("skip")
+        else:
+            print("Found", TARGET_BIN)
+            
+
         i = load_inst_fields(data, r)
         if EIGHT_MODE:
             i = load_inst_fields(data, r, '80')   # i80 = ... instead of i = ... <--------- HOURS LOST !
@@ -623,25 +828,32 @@ def simple_weight():
         print("------------------")
         # def load_multiple(data, r_list)
         keys_used = ['address', 'stallCyclesMLPLoad', 'totalTime', 'stallTime', 'average_mlp']
-        SKIP_START=2000 # time to let the cache load     16Kb/8bytes = 2000 
+        SKIP_START=3000 # time to let the cache load     16Kb/8bytes = 2000 
         for k in keys_used:
             print(len(i[k][SKIP_START:]),k)
             
-        this_binary = data[r]['0']['bench'].split("/")[-1]
         print(data[r])
+        rs = []
         if MULTI :
             if '0' not in data[r]:
                 return
             #if data[r]['0']['benchset'] == 'npb_result':
-            rs = []
             for ru in data:
                 if '0' not in data[ru]:
                     continue
                 binary = data[ru]['0']['bench'].split("/")[-1]
-                if binary == this_binary:
+                if binary == this_binary and data[ru]['0']['benchset'] == data[r]['0']['benchset']:
+
+                    try:
+                        for k in keys_used: 
+                            load_inst_fields(data, ru )[k][SKIP_START:] # test that it works
+                    except:
+                        continue
+
                     rs.append(ru)
                     for k in keys_used:
                         try:
+
                             i[k] = np.concatenate((i[k], load_inst_fields(data, ru )[k][SKIP_START:]))
                         except:
                             continue
@@ -675,7 +887,7 @@ def simple_weight():
             sel = i['address'] == addr # & i['totalTime']  != 0
             j+=1
             mlpWeighted = int(np.mean(i['stallCyclesMLPLoad'][sel]))
-            freq = len(sel)
+            freq = sel.sum()
             if not OLD_V4:
                 mlpWeighted /= 1024
                 mlp_by_mean = int(np.mean(i['stallTime'][sel]/(i['average_mlp'][sel]+1)))
@@ -690,7 +902,7 @@ def simple_weight():
                 hyper_thread_no_mlp = mlpWeighted
             # int(np.mean(i['average_mlp'][sel])), "--->", 
 
-            out += str(addr) + " " + str(int(np.mean(i['totalTime'][sel]))) + " " + str(int(np.mean(i['stallTime'][sel]))) + " " + str(int(mlpWeighted))  + " " + str(mlp_by_mean) + " " + str(hyper_thread_weight) + " " + str(hyper_thread_no_mlp) + " " + str(int(len(i['stallTime'][sel]))) +  " " + str(freq) + "\n"
+            out += str(addr) + " " + str(int(np.mean(i['totalTime'][sel]))) + " " + str(int(np.mean(i['stallTime'][sel]))) + " " + str(int(mlpWeighted))  + " " + str(mlp_by_mean) + " " + str(hyper_thread_weight) + " " + str(hyper_thread_no_mlp) + " " + str(int(len(i['stallTime'][sel]))) +  " " + str(freq) + " " + str(1) + "\n"
             ints_1.append(mlp_by_mean)
             ints_2.append(int(mlp_by_mean/2))
             if mlpWeighted >= 1: 
@@ -705,7 +917,7 @@ def simple_weight():
         extra += "_80" if EIGHT_MODE else ""
         if OLD_V4:
             extra += "_v4"
-        extra += str(writes)
+        extra += str(writes) + "-" + str(len(rs))
         writes+=1
         fname=f"{FIGS_FOLDER}/{RESULT_FOLDER}/{benchset}-{bench}{extra}"
         print("WRITE TO", fname)
@@ -746,6 +958,61 @@ def simple_weight():
 
     iterate_over_benches(data, simp)
 
+text = ""
+def WARMUP_TIME():
+    benchset = []
+    benchname = []
+    time = []
+    def warm(data, r):
+        global text
+        SKIP_START = 2000
+        sel = load_inst_fields(data, r )['totalTime'] > 70
+        data[r]['0']['time_to_warm'] = load_inst_fields(data, r )['start_cycle'][sel][SKIP_START] - load_inst_fields(data, r )['start_cycle'][sel][0]
+        bname = data[r]['0']['bench'].split("/")[-1]
+        benchset_ = data[r]['0']['benchset']
+        text += benchset_ + " " + bname + " " + str(data[r]['0']['time_to_warm'] * (1/3e9)) + "\n"  # at 3GHz this is the time it took to warm
+        benchset.append(benchset_)
+        benchname.append(bname)
+        time.append(data[r]['0']['time_to_warm'] * (1/3e9))
+    iterate_over_benches(data, warm)
+    print(text, benchset, benchname, time)
+    benchset = np.array(benchset)
+    benchname = np.array(benchname)
+    time = np.array(time)
+
+    with open("warmup.txt", "w") as f:
+        f.write(text)
+    # select npb_result and 1GB_GRAPH benchsets
+    npb = benchset == "npb_result"
+    graph = benchset == "1GB_GRAPH"
+    # select bc bench, cg.D and mg.C
+    bc = benchname == "bc"
+    cg = benchname == "cg.D"
+    mg = benchname == "mg.C"
+    print(benchname, benchset, time)
+    # do a bar plot, for each of the benches, where x is the name of the bennch, and Y is the workload simulated time 
+    # print the lenght of each selecxtion
+    print("npb e cg", len(benchname[npb & cg]))
+    print("npb e mg", len(benchname[npb & mg]))
+    print("graph e bc", len(benchname[graph & bc]))
+    print("npb e cg", len(benchname[npb & cg]))
+
+    print(benchname[npb & cg][0])
+    print(benchname[npb & mg][0])
+    print(benchname[graph & bc][0])
+    plt.bar(benchname[npb & cg][0], np.mean(time[npb & cg])*1000)
+    plt.bar(benchname[npb & mg][0], np.mean(time[npb & mg])*1000)
+    plt.bar(benchname[graph & bc][0], np.mean(time[graph & bc])*1000)
+    plt.xlabel("Benchmarks")
+    plt.ylabel("Time to warmup (ms)")
+    plt.title("Average simulation time consumed to warm the caches")
+    plt.savefig(f"./final_data/new_gen/_warmup.png")
+
+
+
+    
+
+
 def iterate_over_benches(data, function):
     global bench_nr
     global bench_name
@@ -753,6 +1020,7 @@ def iterate_over_benches(data, function):
     ok_runs = 0 
     okay_names = []
     bad_runs = 0
+    total_runs = len(data)
     last_error = None
     for r in data:
         if '0' not in data[r].keys() or '80' not in data[r].keys(): # <---------
@@ -789,7 +1057,7 @@ def iterate_over_benches(data, function):
                     print(f'ITERATE_FAILED {"".join(lines)}')
                 else:
                     print("ITERATE_FAILED Error", e)
-                print(f"---  {str(last_error)} x {bad_runs}", end='\r')
+                print(f"---  {str(last_error)} x {bad_runs} ({ok_runs+bad_runs}/{total_runs})", end='\r')
                 last_error = e
             continue
     print(f"ITERATE ENDED, ok runs: {ok_runs}, bad runs: {bad_runs}, total: {ok_runs+bad_runs}")
@@ -3020,7 +3288,8 @@ def load_bench_data():
         #    'L3stallCyclesMLPLoad': np.uint64, 'stallCyclesMLPBoth': np.uint64, 'MLP_store_at_start': np.uint8, 'MLP_store_at_end': np.uint8, 'MLP_load_at_start': np.uint8, 'MLP_load_at_end': np.uint8, 'L3MLP_store_at_start': np.uint8, 'L3MLP_store_at_end': np.uint8, 'L3MLP_load_at_start': np.uint8, 'L3MLP_load_at_end': np.uint8, 'L3MLP_store_at_middle': np.uint8, 'L3MLP_load_at_middle': np.uint8}
 
         inst_types={'tlb_miss': np.uint8,'isLoad': np.uint8,'isStore': np.uint8,'isMicroop': np.uint8,'address': np.uint32,'lastStallTime': np.uint16,'totalTime': np.uint16, 'stallTime': np.uint16, 'L3stallTime': np.uint16, 
-            'L3stallCyclesMLPLoad': np.uint16, 'stallCyclesMLPBoth': np.uint64, 'MLP_store_at_start': np.uint8, 'MLP_store_at_end': np.uint8, 'MLP_load_at_start': np.uint8, 'MLP_load_at_end': np.uint8, 'L3MLP_store_at_start': np.uint8, 'L3MLP_store_at_end': np.uint8, 'L3MLP_load_at_start': np.uint8, 'L3MLP_load_at_end': np.uint8, 'L3MLP_store_at_middle': np.uint8, 'L3MLP_load_at_middle': np.uint8,
+            'L3stallCyclesMLPLoad': np.uint16,
+            'stallCyclesMLPBoth': np.uint64, 'MLP_store_at_start': np.uint8, 'MLP_store_at_end': np.uint8, 'MLP_load_at_start': np.uint8, 'MLP_load_at_end': np.uint8, 'L3MLP_store_at_start': np.uint8, 'L3MLP_store_at_end': np.uint8, 'L3MLP_load_at_start': np.uint8, 'L3MLP_load_at_end': np.uint8, 'L3MLP_store_at_middle': np.uint8, 'L3MLP_load_at_middle': np.uint8,
 
 'stallCyclesMLPLoad': np.uint16,
 'stallCyclesMLPStore': np.uint16,
@@ -3066,10 +3335,15 @@ import matplotlib.pyplot as plt
 
 
 
-def get_field(run, struct,field_name, type_, convolve_skip=False):
+def get_field(run, struct,field_name, type_, convolve_skip=False, PID_ONLY=False, run_folder=None):
+    if run_folder is None:
+        run_folder = RUN_DATA_FOLDER
     if (run['pid'], struct, field_name) in cached_fields:
         return cached_fields[(run['pid'], struct, field_name)]
-    folder_chosen = f"{RUN_DATA_FOLDER}/{run['pid']}-{run['host']}" 
+    if PID_ONLY:
+        folder_chosen = f"{run_folder}/{run['pid']}" 
+    else: 
+        folder_chosen = f"{run_folder}/{run['pid']}-{run['host']}" 
     """
     candidates_expr = f"{RUN_DATA_FOLDER}/{run['pid']}-*/"
     candidates = glob.glob(candidates_expr)
@@ -3771,7 +4045,8 @@ class DictWithGet(dict):
 
 fields = ['address' ,'totalTime', 'accessBracket','L3MLP_store_at_middle', 'L3MLP_load_at_middle', 'stallTime', 'L3stallTime', 'count' , 'stallCyclesMLPLoad', 'stallCyclesMLPStore', 'stallCyclesMLPBoth', 'L3stallCyclesMLPLoad'] # delta
 inst_types={'average_l3mlp': np.uint8, 'average_mlp' :np.uint8, 'tlb_miss': np.uint8,'isLoad': np.uint8,'isStore': np.uint8,'isMicroop': np.uint8,'address': np.uint64,'lastStallTime': np.uint16,'totalTime': np.uint16, 'stallTime': np.uint16, 'L3stallTime': np.uint16, 
-            'L3stallCyclesMLPLoad': np.uint64, 'stallCyclesMLPBoth': np.uint64, 'MLP_store_at_start': np.uint8, 'MLP_store_at_end': np.uint8, 'MLP_load_at_start': np.uint8, 'MLP_load_at_end': np.uint8, 'L3MLP_store_at_start': np.uint8, 'L3MLP_store_at_end': np.uint8, 'L3MLP_load_at_start': np.uint8, 'L3MLP_load_at_end': np.uint8, 'L3MLP_store_at_middle': np.uint8, 'L3MLP_load_at_middle': np.uint8,
+            'L3stallCyclesMLPLoad': np.uint32, # CHANGE
+            'stallCyclesMLPBoth': np.uint64, 'MLP_store_at_start': np.uint8, 'MLP_store_at_end': np.uint8, 'MLP_load_at_start': np.uint8, 'MLP_load_at_end': np.uint8, 'L3MLP_store_at_start': np.uint8, 'L3MLP_store_at_end': np.uint8, 'L3MLP_load_at_start': np.uint8, 'L3MLP_load_at_end': np.uint8, 'L3MLP_store_at_middle': np.uint8, 'L3MLP_load_at_middle': np.uint8,
 
 
 
@@ -3783,7 +4058,8 @@ inst_types={'average_l3mlp': np.uint8, 'average_mlp' :np.uint8, 'tlb_miss': np.u
             
             }
 
-inst_types={'average_l3mlp': np.uint8, 'average_mlp' :np.uint8, 'tlb_miss': np.uint8,'isLoad': np.uint8,'isStore': np.uint8,'isMicroop': np.uint8,'address': np.uint64,'lastStallTime': np.uint16,'totalTime': np.uint16, 'stallTime': np.uint16, 'L3stallTime': np.uint16, 
+inst_types={'average_l3mlp': np.uint8, 'average_mlp' :np.uint8, 'tlb_miss': np.uint8,'isLoad': np.uint8,'isStore': np.uint8,'isMicroop': np.uint8,'address': np.uint64,'lastStallTime': np.uint16,
+            'totalTime': np.uint16, 'stallTime': np.uint16, 'L3stallTime': np.uint16, 
             'L3stallCyclesMLPLoad': np.uint32, 'stallCyclesMLPBoth': np.uint32, 'MLP_store_at_start': np.uint8, 'MLP_store_at_end': np.uint8, 'MLP_load_at_start': np.uint8, 'MLP_load_at_end': np.uint8, 'L3MLP_store_at_start': np.uint8, 'L3MLP_store_at_end': np.uint8, 'L3MLP_load_at_start': np.uint8, 'L3MLP_load_at_end': np.uint8, 'L3MLP_store_at_middle': np.uint8, 'L3MLP_load_at_middle': np.uint8,
 
 
@@ -3950,9 +4226,9 @@ def load_global_fields_crescendo(data, r, tier='0'):
     d = DictWithGet()
     d.set_getter(lambda f : get_field(data[r][tier], GLOBAL, f, global_types[f], convolve_skip=True))
     return d 
-def load_global_fields(data, r, tier='0', convolve=True):
+def load_global_fields(data, r, tier='0', convolve=True, PID_ONLY=False, run_folder=None):
     d = DictWithGet()
-    d.set_getter(lambda f : fill_if_needed(get_field(data[r][tier], GLOBAL, f, global_types[f], convolve_skip=convolve)))
+    d.set_getter(lambda f : fill_if_needed(get_field(data[r][tier], GLOBAL, f, global_types[f], convolve_skip=convolve, PID_ONLY=PID_ONLY, run_folder=run_folder)))
     return d 
 
 FAILURES_LINES = []
@@ -4054,7 +4330,170 @@ def learn_weights(data,r):
                     ]:
                     append_dict('results-'+k,v)
 
+def is_miss_aligned(data,r):
+    # if benchset is 1GB or npb_result
+    if "1GB" in data[r]['0']['benchset'] or "npb_result" in data[r]['0']['benchset']:
+        return True
+    return False
 
+
+
+def metric_eval():
+    per_bench = []
+    benchset  = []
+    benchname = []
+    def valo(data, r):
+        if is_miss_aligned(data,r):
+            return
+    
+
+        glob_0 = load_global_fields(data,r) #convolve=500)
+        if "80" not in data[r]:
+            print("No 80 run", data[r]['0']['benchset'], data[r]['0']['bench'])
+            if r in data_v4 and "80" in data_v4[r]:
+                print("BUT V4 COULD SAVE!")
+                glob_80 = load_global_fields(data_v4, r, "80", PID_ONLY=True, run_folder=RUN_DATA_FOLDER_V4)
+            else:
+                return
+        else:
+            glob_80 = load_global_fields(data,r,"80") # convolve=500)
+        #data_v4
+
+        if len(glob_0['currentCycle']) < 500:
+            print("Not enough execution time..." , len(glob_0['currentCycle']),   data[r]['0']['benchset'], data[r]['0']['bench'])
+            return
+
+        last_idx = get_last_idx_of_smallest_vector(glob_80['currentCycle'],glob_0['currentCycle']) 
+        globy = {}
+        global_slowdown = np.sum(glob_80['currentCycle'][:last_idx])/np.sum(glob_0['currentCycle'][:last_idx])
+        globy = {
+            'global_slowdown': global_slowdown,
+        }
+
+
+
+        i0 = load_inst_fields(data,r)
+        norm = np.sum(glob_0['currentCycle'][:last_idx])
+        globy['totalL3MLPStalledCyclesSummed'] = (np.sum(glob_0['totalL3MLPStalledCyclesSummed'][:last_idx]))/norm 
+        globy['totalL3StalledCyclesSummed'] = (np.sum(glob_0['totalL3StalledCyclesSummed'][:last_idx]))/norm 
+        globy['totalStalledCyclesSummed'] = (np.sum(glob_0['totalStalledCyclesSummed'][:last_idx]))/norm 
+        WIDE_80_USE = False
+        if WIDE_80_USE:
+            i80 = load_inst_fields(data,r,"80")
+            globy['DIFFtotalStalledCyclesSummed'] = (np.sum(glob_80['totalStalledCyclesSummed'][:last_idx])-np.sum(glob_0['totalStalledCyclesSummed'][:last_idx]))/norm 
+            globy['DIFFtotalL3MLPStalledCyclesSummed'] = (np.sum(glob_80['totalL3MLPStalledCyclesSummed'][:last_idx])-np.sum(glob_0['totalL3MLPStalledCyclesSummed'][:last_idx]))/norm 
+
+        globy['commitedLoads'] = np.sum(glob_0['commitedLoads'][:last_idx])/norm # should be the same for each of them..
+        globy['commitedL3Misses'] = np.sum(glob_0['commitedL3Misses'][:last_idx])/norm
+        globy['norma'] = 1 # norm
+        # version using instructions 
+        i = load_inst_fields(data, r)
+        i80 = load_inst_fields(data, r, '80')
+        llc_misses = i['totalTime'] >= 70
+        after_last0 = last_idx+1 if last_idx+1 < len(glob_0['currentCycle']) else last_idx
+        sel0 = llc_misses & (i['start_cycle'] < glob_0['currentCycle'][after_last0])
+        if np.sum(sel0) < 3000:
+            print("Not enough samples... for bench", np.sum(sel0),  data[r]['0']['benchset'], data[r]['0']['bench'])
+            return
+
+        samp =   np.sum(glob_0['commitedL3Misses'][:last_idx])  / np.sum(sel0)  
+        print(samp, np.sum(sel0), last_idx - len(glob_0['commitedL3Misses']) , np.sum(glob_0['commitedLoads'][:last_idx]), np.sum(glob_0['commitedL3Misses'][:last_idx]))
+        norm = norm / samp
+        b = 24.67
+        a = 0.87 
+        globy['inst_soar'] = np.sum( i['stallTime'][sel0] / ( i['totalTime'][sel0] * a + i['average_mlp'][sel0] * b))/norm
+
+        cycles_with_demand_read_0 = np.sum(glob_0['cyclesWithMemrequests'][:last_idx])
+        number_of_demand_reads_0 = np.sum(glob_0['cyclesWithMemrequests'][:last_idx])
+        AOL = cycles_with_demand_read_0/number_of_demand_reads_0 
+        AOL = np.where(number_of_demand_reads_0 == 0, 0, AOL) 
+        unadjusted_slowdown = np.sum(glob_0['stalledCycles'][:last_idx])/np.sum(glob_0['currentCycle'][:last_idx])
+        globy['soal_slow'] = unadjusted_slowdown * (1/(a + b/AOL))
+        #soar_mlp_aware_slowdown = obtain_soar_mlp_aware_slowdown(unadjusted_slowdown, AOL, real_slow_down)
+        
+
+        globy['inst_stalls'] = np.sum(i['stallTime'][sel0]) / norm
+        globy['inst_l3_stalls'] =  np.sum(i['L3stallTime'][sel0]) / norm
+
+
+        if WIDE_80_USE:
+            after_last80 = last_idx+1 if last_idx+1 < len(glob_80['currentCycle']) else last_idx
+            sel80 = (i80['totalTime'] >= 70) & (i80['start_cycle'] < glob_80['currentCycle'][after_last80])
+            globy['inst_l3_stalls_diffDfastCycles'] = (np.sum(i80['L3stallTime'][sel80]) - np.sum(i['L3stallTime'][sel0])) / norm
+            globy['inst_stalls_diffDfastCycles'] = (np.sum(i80['stallTime'][sel80]) - np.sum(i['stallTime'][sel0])) / norm
+            globy['inst_l3_stalls_MEANdiffDfastCycles'] = (np.mean(i80['L3stallTime'][sel80]) - np.mean(i['L3stallTime'][sel0])) / norm
+            globy['inst_stalls_MEANdiffDfastCycles'] = (np.mean(i80['stallTime'][sel80]) - np.mean(i['stallTime'][sel0])) / norm
+            globy['inst_llc_missesSLOW'] = np.sum(i80['totalTime'][sel80] >= 70) / norm 
+
+
+        globy['inst_l3mlp'] = (np.sum(i['L3stallCyclesMLPLoad'][sel0])) / norm
+        globy['inst_mlp'] = (np.sum(i['stallCyclesMLPLoad'][sel0])) / norm
+        globy['inst_llc_misses'] = np.sum(i['totalTime'][sel0] >= 70) / norm 
+        # % of stall time
+        # % of stall time by Soars metrics 
+        per_bench.append(globy)
+        benchset.append(data[r]['0']['benchset'])
+        benchname.append(data[r]['0']['bench'])
+        return
+        #globy['iTotalL3StalledCyclesSummed'] = np.sum(glob_0['totalL3StalledCyclesSummed'][:last_idx])/norm
+    # plot x = global_slowdown
+    # y = each of the keys
+    iterate_over_benches(data, valo)
+    all_together = {}
+    print("about do do globaos de outrs")
+    for b in per_bench:
+        for k in b:
+            if k not in all_together:
+                all_together[k] = []
+            all_together[k].append(b[k])
+    benchsets =  [ "cpu2017", "gapbs",   "NPB-CPP",            "pkgs/apps",   "pkgs/kernels" ,"XSBench", "liblinear", "pkgs/splash"]
+    benchsetsHUMAN =  [ "CPU2017", "GAPBS",   "NPB",            "PARSEC-apps",   "PARSEC-kernels" ,"XSBench", "liblinear", "PARSEC-splash"]
+    colors = ['blue', 'orange', 'purple', 'green', 'red', 'black', 'pink', 'brown', 'gray']
+    benchset_colors = []
+    for b in benchname:
+        found = False
+        for name in benchsets:
+            print(name in b , name, b)
+            if name in b:
+                benchset_colors.append(benchsets.index(name))
+                found = True
+                break
+        if found:
+            continue
+        benchset_colors.append(-1) # other
+        print("other is ", b)
+    final_colors = []
+    for c in benchset_colors:
+        final_colors.append(colors[c])
+    print(final_colors, benchname,benchset, benchset_colors, "---")
+    
+    print(benchsets, all_together.keys())
+    for k in all_together:
+        plt.figure()
+        from scipy.stats.mstats import winsorize
+        print(final_colors)
+        all_together[k] = winsorize(np.array(all_together[k]), limits=[0.01, 0.01])
+        
+
+        print(all_together[k])
+        plt.scatter(all_together['global_slowdown'], all_together[k], c=final_colors, alpha=0.6)
+        
+        import matplotlib.patches as mpatches
+        legend_patches = [mpatches.Patch(color=color, label=benchset) 
+                        for benchset, color in zip(benchsetsHUMAN, colors)]
+
+        plt.legend(handles=legend_patches, loc='upper left', fontsize=10)
+        plt.xlabel('Global Slowdown')
+        plt.ylabel('Metric')
+        plt.savefig('globos de ouro' + k + '.png' )
+        # ledged with benchstsHUMAN
+
+        plt.close()
+    print(len(all_together['global_slowdown']))
+
+    
+
+    
     
 
 FIELDS_OF_INTEREST = ['currentCycle', 'stalledCycles', 'cyclesWithMemrequests', 'commitedLoads', 'commitedL3Misses', 'commitedLoads',  'L3stalledCycles', 'L3stallCyclesMLPLoad']
@@ -5088,6 +5527,18 @@ def plot_global_results():
     
 # 
 data = load_bench_data()
+
+old_RUN_DATA_FOLDER= RUN_DATA_FOLDER
+old_run_meta = run_meta
+
+RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/v4/results_gem5"
+RUN_DATA_FOLDER_V4="/mnt/nas/inesc/ist196723/osdi26/v4/results_gem5"
+#RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/results_gem5"
+run_meta=f"{RUN_DATA_FOLDER}/gem5_pids.txt"
+data_v4 = load_bench_data()
+
+RUN_DATA_FOLDER=old_RUN_DATA_FOLDER
+run_meta=old_run_meta
 #print(data)
 
 def plot_global_sample_cost():
