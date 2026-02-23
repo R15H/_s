@@ -11,27 +11,40 @@ from scipy import stats
 import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
 
-# KNOB
-LIMIT_BY_AGG = False
-DATASET_S = ""
-OVERRIDE_PID_ONLY = False
-OVERRIDE_RUN_FOLDER = None
-AOL_BIG = False
-SHOULD_PLOT_KEY = lambda x: True
-GEM5_PIDS_TAIL=0
-#GEM5_PIDS_TAIL=-100
-OVERRIDE_DATASET=None
-OVERRIDE_DATASET=4
-OVERRIDE_DATASET=1
-ERROR_VIEW=False
-BY_HOT=False
-LLC_ONLY=False
-REGRESS_SOAR=True
-REGRESS_SOAR=False
-NO_WINSOR=True
-NO_WINSOR=False
-#10 #
-TRACE_MODE =   sys.maxsize # 1 # sys.maxsize 
+
+# KNOB — defaults (overridable via command-line arguments)
+import argparse as _ap
+_p = _ap.ArgumentParser(description="python_parserFTW knobs")
+_p.add_argument("--limit-by-agg",     action="store_true",  default=False,          help="Enable LIMIT_BY_AGG (default: False)")
+_p.add_argument("--dataset-s",        type=str,             default="",             help="DATASET_S string (default: '')")
+_p.add_argument("--override-pid-only",action="store_true",  default=False,          help="Enable OVERRIDE_PID_ONLY (default: False)")
+_p.add_argument("--override-run-folder", type=str,          default=None,           help="OVERRIDE_RUN_FOLDER path (default: None)")
+_p.add_argument("--aol-big",          action="store_true",  default=False,          help="Enable AOL_BIG (default: False)")
+_p.add_argument("--gem5-pids-tail",   type=int,             default=-100,           help="GEM5_PIDS_TAIL (default: -100)")
+_p.add_argument("--override-dataset", type=int,             default=4,              help="OVERRIDE_DATASET (default: 4). Use -1 for None.")
+_p.add_argument("--error-view",       action="store_true",  default=False,          help="Enable ERROR_VIEW (default: False)")
+_p.add_argument("--by-hot",           action="store_true",  default=False,          help="Enable BY_HOT (default: False)")
+_p.add_argument("--llc-only",         action="store_true",  default=False,          help="Enable LLC_ONLY (default: False)")
+_p.add_argument("--regress-soar",     action="store_true",  default=False,          help="Enable REGRESS_SOAR (default: False)")
+_p.add_argument("--no-winsor",        action="store_true",  default=False,          help="Enable NO_WINSOR (default: False)")
+_p.add_argument("--trace-mode",       type=int,             default=None,           help="TRACE_MODE (default: sys.maxsize). Integer value.")
+_args, _unknown = _p.parse_known_args()
+
+LIMIT_BY_AGG       = _args.limit_by_agg
+DATASET_S           = _args.dataset_s
+OVERRIDE_PID_ONLY   = _args.override_pid_only
+OVERRIDE_RUN_FOLDER = _args.override_run_folder
+AOL_BIG             = _args.aol_big
+SHOULD_PLOT_KEY     = lambda x: True
+GEM5_PIDS_TAIL      = _args.gem5_pids_tail
+OVERRIDE_DATASET    = None if _args.override_dataset == -1 else _args.override_dataset
+ERROR_VIEW          = _args.error_view
+BY_HOT              = _args.by_hot
+LLC_ONLY            = _args.llc_only
+REGRESS_SOAR        = _args.regress_soar
+NO_WINSOR           = _args.no_winsor
+TRACE_MODE          = _args.trace_mode if _args.trace_mode is not None else sys.maxsize
+ 
 #KEYS_TO_DO = ['Instruction Store Bound + Load Stall Cycles/MLP']
 def ALL_DESIRED_KEYS(globy):
     #return  '∆ Load/Store bound cycles' in key.lower()
