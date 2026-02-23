@@ -4131,14 +4131,15 @@ def simple_weight():
             agg80 = load_aggregate_fields(data, r, '80')  # was not passing the 80 here...
             #print(data[r]['80']['line'])
             try:
-                zero = _proccess_inst(addr,agg)    
-                eighty = _proccess_inst(addr,agg80)    
-            except Exception as e:    
+                zero = _proccess_inst(addr,agg)
+                eighty = _proccess_inst(addr,agg80)
+            except Exception as e:
                 print(e)
                 import traceback
                 traceback.print_exc()
+                return ""
 
-            if not zero: 
+            if not zero:
                 return ""
             return zero[:-2] + " " + eighty
                 
@@ -6782,7 +6783,10 @@ def get_field(run, struct,field_name, type_, convolve_skip=False, PID_ONLY=False
         print(candidates, 'candidates')
         raise Exception("No candidate found for timestamp", timestamp)
     """
-    arr =  np.fromfile(f"{folder_chosen}/_{struct}_{field_name}_{run['pid']}.txt", dtype=type_)
+    field_path = f"{folder_chosen}/_{struct}_{field_name}_{run['pid']}.txt"
+    if not os.path.exists(field_path):
+        raise FileNotFoundError(f"Field file not found: {field_path} (pid={run['pid']}, struct={struct}, field={field_name})")
+    arr =  np.fromfile(field_path, dtype=type_)
     #arr =  np.fromfile(f"{RUN_DATA_FOLDER}/{run['pid']}-{run['host']}/_{struct}_{field_name}_{run['pid']}.txt", dtype=type_)
     #print("Average window size", average_window_size)
     #print("convo", convolve_skip)
