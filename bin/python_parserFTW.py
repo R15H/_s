@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from ctypes  import *
 import collections
 global_only = False
@@ -11,8 +12,6 @@ from scipy import stats
 import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
 
-
-# KNOB — defaults (overridable via command-line arguments)
 import argparse as _ap
 _p = _ap.ArgumentParser(description="python_parserFTW knobs")
 _p.add_argument("--limit-by-agg",     action="store_true",  default=False,          help="Enable LIMIT_BY_AGG (default: False)")
@@ -20,7 +19,7 @@ _p.add_argument("--dataset-s",        type=str,             default="",         
 _p.add_argument("--override-pid-only",action="store_true",  default=False,          help="Enable OVERRIDE_PID_ONLY (default: False)")
 _p.add_argument("--override-run-folder", type=str,          default=None,           help="OVERRIDE_RUN_FOLDER path (default: None)")
 _p.add_argument("--aol-big",          action="store_true",  default=False,          help="Enable AOL_BIG (default: False)")
-_p.add_argument("--gem5-pids-tail",   type=int,             default=-100,           help="GEM5_PIDS_TAIL (default: -100)")
+_p.add_argument("--gem5-pids-tail",   type=int,             default=0,           help="GEM5_PIDS_TAIL (default: -100)")
 _p.add_argument("--override-dataset", type=int,             default=4,              help="OVERRIDE_DATASET (default: 4). Use -1 for None.")
 _p.add_argument("--error-view",       action="store_true",  default=False,          help="Enable ERROR_VIEW (default: False)")
 _p.add_argument("--by-hot",           action="store_true",  default=False,          help="Enable BY_HOT (default: False)")
@@ -28,6 +27,8 @@ _p.add_argument("--llc-only",         action="store_true",  default=False,      
 _p.add_argument("--regress-soar",     action="store_true",  default=False,          help="Enable REGRESS_SOAR (default: False)")
 _p.add_argument("--no-winsor",        action="store_true",  default=False,          help="Enable NO_WINSOR (default: False)")
 _p.add_argument("--trace-mode",       type=int,             default=None,           help="TRACE_MODE (default: sys.maxsize). Integer value.")
+_p.add_argument("--function",       type=str,             default=None,           help="FUNCTION (default: None)")
+_p.add_argument("-skip_gem5"       )
 _args, _unknown = _p.parse_known_args()
 
 LIMIT_BY_AGG       = _args.limit_by_agg
@@ -44,16 +45,14 @@ LLC_ONLY            = _args.llc_only
 REGRESS_SOAR        = _args.regress_soar
 NO_WINSOR           = _args.no_winsor
 TRACE_MODE          = _args.trace_mode if _args.trace_mode is not None else sys.maxsize
- 
-#KEYS_TO_DO = ['Instruction Store Bound + Load Stall Cycles/MLP']
 def ALL_DESIRED_KEYS(globy):
-    #return  '∆ Load/Store bound cycles' in key.lower()
+    #return  ' Load/Store bound cycles' in key.lower()
     return False
-    return all([ k in list(globy.keys()) for k in KEYS_TO_DO]) 
+    return all([ k in list(globy.keys()) for k in KEYS_TO_DO])
 def HIGH_PRIORITY_KEYS(key):
     if "fcount" in key.lower() or "scount"  in key.lower():
         return False
-    #return  '∆ Load/Store bound cycles' in key.lower()
+    #return  ' Load/Store bound cycles' in key.lower()
     return True
     if 'store' in key.lower():
         return True
@@ -3822,6 +3821,7 @@ def simple_weight():
     INSTRUCTION_ONLY_MODE = False
     OLD_V4=True
     OLD_V4=False
+    print("RUNNING SIMPLE_WEIGHT")
     if OLD_V4:
         RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/v4/results_gem5"
         #RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/results_gem5"
@@ -4232,7 +4232,7 @@ def simple_weight():
     return iterate_over_benches(data, simp ,
                          reject= lambda data,r :  all( [ a not in data[r]['0']['line'] for a in [ 
                              'gapbs/bc' 
-                             # "synt"
+                              #"synt"
                              #'cg.D' 
                                                                                                 # 'syn'
                                                                                                  ]])#'sp.B' ]] ) # sroms', 'pr', 'lbm','cact',  'bc']])
@@ -6608,15 +6608,6 @@ def load_bench_data():
     DATASET=3
     DATASET=1
     DATASET=1 # only all older than day 7
-    DATASET=5
-    DATASET=4
-    DATASET=1
-    DATASET=4
-    DATASET=4
-
-    DATASET=0
-
-    DATASET=4
     DATASET=1
     if OVERRIDE_DATASET:
         DATASET=OVERRIDE_DATASET
@@ -6627,135 +6618,143 @@ def load_bench_data():
     GET_BIG_DATASET = False ########### CHANGE
     GET_BIGGEST=False
     DATASET_S = "__" + str(DATASET) + "_SUS_"
+
     
     def __l(run_meta):
         old_runs = 0
         new_runs = 0
         kkk = 0
-        with open(run_meta, 'r') as file:
-            for line in file:
-                all_lines.append(line)
+        print("PARSING", run_meta, "dataset:",DATASET)
+        def process_file():
+            with open(run_meta, 'r') as file:
+                for line in file:
+                    all_lines.append(line)
 
 
-            for line in all_lines[GEM5_PIDS_TAIL:]:
-                if len(line.split(" ")) < 2:
-                    continue
-                is_new_run = False
-                try:
-                    _  = build_run_data(line)
-                    _['line'] = line
+                for line in all_lines[GEM5_PIDS_TAIL:]:
+                    if len(line.split(" ")) < 2:
+                        continue
+                    is_new_run = False
                     try:
-                        __ = int(_['pid'])
-                    except:
-                        print(_['pid'], "FAIL TO CONVERT TO INT", line)
-                        continue
-                    date =  int(line.split(" ")[-1])
-                    december_day_7_2025_mid_night =  1765065600 # WHEN NEW BATCH WITH SOAR INST 
-                    december_store_implemented = 1765969399
-                                                # 765247870
-                                                #1765970398
-                                                #1765315488
-                                                #1765315104
-                                                #1765010844
-                                                 #1764920331
-                    if DATASET == 5:
-                        if (date -december_day_7_2025_mid_night < 0):
+                        _  = build_run_data(line)
+                        _['line'] = line
+                        try:
+                            __ = int(_['pid'])
+                        except:
+                            print(_['pid'], "FAIL TO CONVERT TO INT", line)
                             continue
+                        date =  int(line.split(" ")[-1])
+                        december_day_7_2025_mid_night =  1765065600 # WHEN NEW BATCH WITH SOAR INST 
+                        december_store_implemented = 1765969399
+                                                    # 765247870
+                                                    #1765970398
+                                                    #1765315488
+                                                    #1765315104
+                                                    #1765010844
+                                                    #1764920331
+                        if DATASET == 5:
+                            if (date -december_day_7_2025_mid_night < 0):
+                                continue
 
-                    if DATASET == 4:
+                        if DATASET == 4:
 
-                        #if (date - december_day_7_2025_mid_night ) < 0:
-                        if (date - december_store_implemented) < 0:
+                            #if (date - december_day_7_2025_mid_night ) < 0:
+                            if (date - december_store_implemented) < 0:
+                                continue
+                        if DATASET == 1 and (date - december_store_implemented) >= 0:
                             continue
-                    if DATASET == 1 and (date - december_store_implemented) >= 0:
-                        continue
-                    """
-                    if (date - december_store_implemented) > 0:
-                        if DATASET == 1:
-                            continue
-                        if DATASET == 2:
-                            continue # ONLY ALLOW PASS THOROUGH OF THE RUNS SHOWN IN DISCROD REGARDING SOAR INST
-                    else:
-                        if DATASET == 3: # se é negativo e é o 3 SKIP (i.e. ignora antigos)
-                            continue
+                        """
+                        if (date - december_store_implemented) > 0:
+                            if DATASET == 1:
+                                continue
+                            if DATASET == 2:
+                                continue # ONLY ALLOW PASS THOROUGH OF THE RUNS SHOWN IN DISCROD REGARDING SOAR INST
+                        else:
+                            if DATASET == 3: # se é negativo e é o 3 SKIP (i.e. ignora antigos)
+                                continue
 
-                        
-                    if (date - december_day_7_2025_mid_night) < 0:  
-                        if DATASET == 2: ######## SE é suposto ter o SOAR, skip!
-                            continue
-                        old_runs +=1
                             
-                        if SOURCE_INST_DATA == OFULL:
-                            #continue # ingore old RUNS
-                            pass
-                    else:
-                        new_runs += 1
-                        is_new_run = True
-                        if DATASET == 1: # se é > 0, é mt recente.
-                            continue
-                    """
-                except Exception as e:
-                    print(e)
-                    print(line)
-                    continue
-
-                r_number = _['benchnr']
-                if not r_number in all_data:
-                    all_data[r_number] = {}
-
-                #print(line, "PID", "pid", line.split("pid: ")[1].split(" ")[0].strip(), "OOOOOO")
-                if _['increase'] in all_data[r_number]: 
-                    print("WARNING: Duplicate increase", line)
-                    print("huuu")
-                    if not GET_BIG_DATASET:
-                        all_data[r_number][_['increase']] = _ 
-                        continue
-                    #continue
-
-                    #if not is_new_run:
-                    #    continue
-                    try:
-                        g = load_global_fields({r_number: {_['increase'] : _}}, r_number, _['increase'])
-                        go = (g['currentCycle'])
-                    except:
-                        continue
-                    try:
-                        g_old = load_global_fields(all_data, r_number, _['increase'])
-                        #all_data[r_number]
-                        print(len(g_old['currentCycle']) - len(g['currentCycle']))
-                        kkk +=1
-                        #if kkk == 20: break
-
-                        if (len(g_old['currentCycle']) - len(g['currentCycle']) > 0):
-                            #and not is_new_run:
-                            print("Is nto new run..")
-                            continue
-                        
-                        #print(g['currentCycle'])
-                        #print("done")
-                        #exit(0)
-
-                        #glob_80 = load_global_fields(data_v4, r, "80", PID_ONLY=True, run_folder=RUN_DATA_FOLDER_V4)
+                        if (date - december_day_7_2025_mid_night) < 0:  
+                            if DATASET == 2: ######## SE é suposto ter o SOAR, skip!
+                                continue
+                            old_runs +=1
+                                
+                            if SOURCE_INST_DATA == OFULL:
+                                #continue # ingore old RUNS
+                                pass
+                        else:
+                            new_runs += 1
+                            is_new_run = True
+                            if DATASET == 1: # se é > 0, é mt recente.
+                                continue
+                        """
                     except Exception as e:
-                        print("RIP",e)
+                        print(e)
+                        print(line)
+                        continue
+
+                    r_number = _['benchnr']
+                    if not r_number in all_data:
+                        all_data[r_number] = {}
+
+                    #print(line, "PID", "pid", line.split("pid: ")[1].split(" ")[0].strip(), "OOOOOO")
+                    if _['increase'] in all_data[r_number]: 
+                        print("WARNING: Duplicate increase", line)
+                        print("huuu")
+                        if not GET_BIG_DATASET:
+                            all_data[r_number][_['increase']] = _ 
+                            continue
+                        #continue
+
+                        #if not is_new_run:
+                        #    continue
+                        try:
+                            g = load_global_fields({r_number: {_['increase'] : _}}, r_number, _['increase'])
+                            go = (g['currentCycle'])
+                        except:
+                            print("blew up")
+                            continue
+                        try:
+                            g_old = load_global_fields(all_data, r_number, _['increase'])
+                            #all_data[r_number]
+                            print(len(g_old['currentCycle']) - len(g['currentCycle']))
+                            kkk +=1
+                            #if kkk == 20: break
+
+                            if (len(g_old['currentCycle']) - len(g['currentCycle']) > 0):
+                                #and not is_new_run:
+                                print("Is nto new run..")
+                                continue
+                            
+                            #print(g['currentCycle'])
+                            #print("done")
+                            #exit(0)
+
+                            #glob_80 = load_global_fields(data_v4, r, "80", PID_ONLY=True, run_folder=RUN_DATA_FOLDER_V4)
+                        except Exception as e:
+                            print("RIP",e)
+                            #exit(0)
+                            #continue
+                            #print('blo')
+                            #print(e)
+                            #continue
+                        print("i")
                         #exit(0)
-                        #continue
-                        #print('blo')
-                        #print(e)
-                        #continue
-                    print("i")
-                    #exit(0)
-                
+                    
 
-                all_data[r_number][_['increase']] = _ 
-                print("OLD_TRACK", old_runs, new_runs)
-                #def get_run_name(run):
-                #    return os.path.basename(run['0']['bench']).split('.')[0]
+                    all_data[r_number][_['increase']] = _ 
+                    print("OLD_TRACK", old_runs, new_runs)
+                    #def get_run_name(run):
+                    #    return os.path.basename(run['0']['bench']).split('.')[0]
 
-                #_['global'] = load_struct(GlobalStatsss,glob.glob(f"/mnt/nas/inesc/ist196723/osdi26/results_gem5/global_{_['pid']}_{_['host']}*.bin")[0])
-                #_['inst'] = load_struct(InstructionData,glob.glob(f"/mnt/nas/inesc/ist196723/osdi26/results_gem5/aggregate_{_['pid']}_{_['host']}*.bin")[0])
-                #_['final'] = load_struct(FinalMetrics,glob.glob(f"/mnt/nas/inesc/ist196723/osdi26/results_gem5/inst_{_['pid']}_{_['host']}*.bin")[0])
-                    #f"/mnt/nas/inesc/ist196723/osdi26/results_gem5/output_{rdata["host"]}.bin")
+                    #_['global'] = load_struct(GlobalStatsss,glob.glob(f"/mnt/nas/inesc/ist196723/osdi26/results_gem5/global_{_['pid']}_{_['host']}*.bin")[0])
+                    #_['inst'] = load_struct(InstructionData,glob.glob(f"/mnt/nas/inesc/ist196723/osdi26/results_gem5/aggregate_{_['pid']}_{_['host']}*.bin")[0])
+                    #_['final'] = load_struct(FinalMetrics,glob.glob(f"/mnt/nas/inesc/ist196723/osdi26/results_gem5/inst_{_['pid']}_{_['host']}*.bin")[0])
+                        #f"/mnt/nas/inesc/ist196723/osdi26/results_gem5/output_{rdata["host"]}.bin")
+        process_file()
+        print(old_runs, new_runs, kkk)
+
+
 
 
     if DATASET == 0:
@@ -12270,10 +12269,12 @@ cooling_is_bad()
 #quinta()
 #exit(0)
 import sys
-if sys.argv[1].startswith("N"):
-    sys.argv[1] = sys.argv[1][1:]
-    print("evaling", " ".join(sys.argv[1:]))
-    eval(" ".join(sys.argv[1:]))
+if _args.function and _args.skip_gem5:
+#if sys.argv[1].startswith("N"):
+    #sys.argv[1] = sys.argv[1][1:]
+    #print("evaling", " ".join())
+    #eval(" ".join(sys.argv[1:]))
+    eval(_args.function)
     exit(0)
 
 
@@ -13356,7 +13357,8 @@ if arg0 == "iterate_over_benches":
     iterate_over_benches(data, function)
 else:
     print("evaling", " ".join(sys.argv[1:]))
-    eval(" ".join(sys.argv[1:]))
+    eval(_args.function)
+    #eval(" ".join(sys.argv[1:]))
 #  ./report/images/load_images.sh 'pdo plot_my_soar()'
 
 exit(0)
