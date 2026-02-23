@@ -19,10 +19,10 @@ OVERRIDE_RUN_FOLDER = None
 AOL_BIG = False
 SHOULD_PLOT_KEY = lambda x: True
 GEM5_PIDS_TAIL=0
-GEM5_PIDS_TAIL=-100
+#GEM5_PIDS_TAIL=-100
 OVERRIDE_DATASET=None
-OVERRIDE_DATASET=1
 OVERRIDE_DATASET=4
+OVERRIDE_DATASET=1
 ERROR_VIEW=False
 BY_HOT=False
 LLC_ONLY=False
@@ -3806,6 +3806,7 @@ def simple_weight():
     global RUN_DATA_FOLDER
     global OLD_V4
     RESULT_FOLDER="maps"
+    INSTRUCTION_ONLY_MODE = False
     OLD_V4=True
     OLD_V4=False
     if OLD_V4:
@@ -3832,8 +3833,6 @@ def simple_weight():
         this_binary = data[r]['0']['bench'].split("/")[-1]
         print(this_binary, "THI SBINARY")
         if TARGET_BIN and TARGET_BIN not in this_binary:
-            print("WOW")
-
             return
         benchset = data[r]['0']['benchset']
         if benchset != "npb_result-iter":
@@ -3887,6 +3886,7 @@ def simple_weight():
 
         if MULTI :
             if '0' not in data[r]:
+                print('humm 0 not in data!')
                 return
             #if data[r]['0']['benchset'] == 'npb_result':
             for ru in data:
@@ -3931,6 +3931,7 @@ def simple_weight():
                 pass
                 #return
         else:
+            print("Not multi we die")
             return
             pass
             #return
@@ -4163,7 +4164,7 @@ def simple_weight():
             out += process_inst(addr)
         """
         actually_added = len(list(filter(lambda x: x != "", results)))
-        out = "".join(results)
+        out = "\n".join(results)
 
 
         
@@ -4213,11 +4214,13 @@ def simple_weight():
             f.write(do_compressed(inst_priority, uniq_add)) # keep same priority
 
     data = load_bench_data()
-    return iterate_over_benches(data, simp)
+    #return iterate_over_benches(data, simp, reject= lambda x,y: False)
 
-    iterate_over_benches(data, simp ,
+    return iterate_over_benches(data, simp ,
                          reject= lambda data,r :  all( [ a not in data[r]['0']['line'] for a in [ 
-                             'synt'
+                             'gapbs/bc' 
+                             # "synt"
+                             #'cg.D' 
                                                                                                 # 'syn'
                                                                                                  ]])#'sp.B' ]] ) # sroms', 'pr', 'lbm','cact',  'bc']])
                          )  # 'bwaves'
