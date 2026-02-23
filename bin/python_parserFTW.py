@@ -3812,11 +3812,13 @@ def psw___(): # plot syntehthic weights
 
 
     
-def simple_weight():
+def simple_weight(use_aggregate=True):
     global run_meta
     global DATA_FOLDER
     global RUN_DATA_FOLDER
     global OLD_V4
+    USE_AGGREGATE = use_aggregate   # True  → aggregate metrics (fast, count-weighted)
+                                    # False → per-instruction metrics
     RESULT_FOLDER="maps"
     INSTRUCTION_ONLY_MODE = False
     OLD_V4=True
@@ -3855,8 +3857,8 @@ def simple_weight():
             
         #exit(0)
 
-        ignore_inst = True
-        if not ignore_inst:
+        # USE_AGGREGATE is set by the simple_weight(use_aggregate=...) parameter
+        if not USE_AGGREGATE:
             i = load_inst_fields(data, r)
             if EIGHT_MODE:
                 i = load_inst_fields(data, r, '80')   # i80 = ... instead of i = ... <--------- HOURS LOST !
@@ -3874,7 +3876,7 @@ def simple_weight():
         # def load_multiple(data, r_list)
         keys_used = ['address', 'stallCyclesMLPLoad', 'totalTime', 'stallTime', 'average_mlp']
         SKIP_START=000 # time to let the cache load     16Kb/8bytes = 2000 
-        if not ignore_inst:
+        if not USE_AGGREGATE:
             for k in keys_used:
                 print(len(i[k][SKIP_START:]),k, "lol")
                 i[k] = i[k][SKIP_START:]
@@ -3931,7 +3933,7 @@ def simple_weight():
                             v =  np.concatenate((i[k], load_inst_fields(data, ru )[k][SKIP_START:]))
                             i[k] = v
                         except :
-                            if not ignore_inst:
+                            if not USE_AGGREGATE:
                                 print("FAILED??")
                                 exit(0)
                     for k in agg_keys:
@@ -3950,13 +3952,13 @@ def simple_weight():
             #return
 
         for k in keys_used:
-            if not ignore_inst:
+            if not USE_AGGREGATE:
                 print(len(i[k][SKIP_START:]),k)
 
 
         bio = data[r]['0']['bench']
         print('benchname is ', bio)
-        if not ignore_inst:
+        if not USE_AGGREGATE:
             sel = i['totalTime'] != 0
             add = i['address'][sel]
         else: 
@@ -3966,14 +3968,16 @@ def simple_weight():
         sel = i['totalTime'] != 0
         add = i['address'][sel]
         """
-        if not ignore_inst:
+        if not USE_AGGREGATE:
             print("Unique addresses:", np.unique(i['address']))
         #agg = load_aggregate_fields(data, r) ---- if multi is being used no need to use this.. 
         #agg = load_aggregate_fields(data, r,'80')
         #uniq_add = np.sort(np.unique(add[add < 140000000000335 ]))
-        uniq_add = np.sort(np.unique(agg['address'][agg['address'] < 140000000000335 ]))
-        #uniq_add = np.sort(np.unique(i['address'])) # np.unique(agg['address'][agg['address'] < 140000000000335 ]))
-        if not ignore_inst:
+        if USE_AGGREGATE:
+            uniq_add = np.sort(np.unique(agg['address'][agg['address'] < 140000000000335 ]))
+        else:
+            uniq_add = np.sort(np.unique(i['address']))
+        if not USE_AGGREGATE:
             if( len(np.unique(i['address'])) != len(np.unique(agg['address']))):
                 print("SADLY DIFF IS ", len(np.unique(i['address'])) - len(np.unique(agg['address'])), bio)
 
@@ -4072,8 +4076,8 @@ def simple_weight():
                 #j+=1
                 def toi(n):
                     return int(n if not np.isnan(n) else 0)
-                mlpWeighted = 0 if ignore_inst else toi(np.mean(i['stallCyclesMLPLoad'][sel])) # if not np.isnan(np.mean(i['stallCyclesMLPLoad'][sel])) else 0
-                freq = sel.sum() if not ignore_inst else inst_cost(4, lambda llc_misses,hidden_cost,n_llc_misses: n_llc_misses)  
+                mlpWeighted = 0 if USE_AGGREGATE else toi(np.mean(i['stallCyclesMLPLoad'][sel])) # if not np.isnan(np.mean(i['stallCyclesMLPLoad'][sel])) else 0
+                freq = sel.sum() if not USE_AGGREGATE else inst_cost(4, lambda llc_misses,hidden_cost,n_llc_misses: n_llc_misses)
 
                 totTime = inst_cost(4, lambda llc_misses,hidden_cost,n_llc_misses: int(np.sum(aggi['totalTime'][llc_misses]/n_llc_misses)) )
                 if(totTime < 250):
@@ -4083,7 +4087,7 @@ def simple_weight():
                 sTime = inst_cost(4, lambda llc_misses,hidden_cost,n_llc_misses: int(np.sum(aggi['stallTime'][llc_misses]/n_llc_misses)) )
                 mlpWeighted = inst_cost(4, lambda llc_misses,hidden_cost,n_llc_misses: int(np.sum(aggi['stallCyclesMLPLoad'][llc_misses]/n_llc_misses)) )
 
-                if not OLD_V4 and not ignore_inst:
+                if not OLD_V4 and not USE_AGGREGATE:
                     exit(0)
                     mlpWeighted /= 1024
                     mlp_by_mean = toi(np.mean(i['stallTime'][sel]/(i['average_mlp'][sel]+1)))
@@ -4100,8 +4104,8 @@ def simple_weight():
 
                 # IS BY AGG VERY DIFF THAN BY INST? 
 
-                totTime = totTime if ignore_inst else np.mean(i['totalTime'][sel])
-                sTime = sTime if ignore_inst else np.mean(i['stallTime'][sel])
+                totTime = totTime if USE_AGGREGATE else np.mean(i['totalTime'][sel])
+                sTime = sTime if USE_AGGREGATE else np.mean(i['stallTime'][sel])
                 #toi(totTime) + toi(sTime)  + toi(aggCost) + toi(aggStoreCost) + toi(mlpWeighted) +
                 bmw_metric = mlpWeightedAgg + aggStoreCost #aggCost 
                 relevant_costs =  toi(mlp_by_mean) + toi(mlpWeightedAgg) + toi(bmw_metric)
@@ -4112,7 +4116,7 @@ def simple_weight():
                 #print("RELEVANT COSTS", relevant_costs)
                 def si(_):
                     return str(toi(_)) + " "
-                lstall = toi(len(i['stallTime'][sel])) if not ignore_inst else 0    # makes no sense but okay
+                lstall = toi(len(i['stallTime'][sel])) if not USE_AGGREGATE else 0    # makes no sense but okay
                 res =  str(addr) + " " + \
                 str(toi(totTime)) + " " + \
                 str(toi(sTime)) + " " +\
