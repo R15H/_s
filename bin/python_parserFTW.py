@@ -3612,11 +3612,13 @@ def psw___(): # plot syntehthic weights
     inst_sel = (df["ADDR"] == (i[1]))
     climb = df[inst_sel]["arand"] == df[inst_sel]["aptr"]
     #inst_sel = inst_sel & ~climb
-    df_inst2 = df[inst_sel].reset_index(drop=True)  
+    df_inst2 = df[inst_sel].reset_index(drop=True)
+    # Merge on experiment parameters so rows are aligned by experiment, not position
+    df_merged = pd.merge(df_inst1, df_inst2, on=["arand", "aptr"], suffixes=("_ptr", "_str"))
     wc=0
-    marker = 'x'#["x" if m else "." for m in climb] 
+    marker = 'x'#["x" if m else "." for m in climb]
     # Compute climb AFTER reset_index so indices are aligned
-    climb = df_inst1["arand"] == df_inst1["aptr"]  # boolean mask, index 0,1,2,...
+    climb = df_merged["arand"] == df_merged["aptr"]  # boolean mask, index 0,1,2,...
 
     #"""
     wc = 0
@@ -3658,16 +3660,16 @@ def psw___(): # plot syntehthic weights
     #"""
     for weight in FIELDSSS:
         #print(df[inst_sel], "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD")
-        plt.scatter(df_inst1["arand"], df_inst1[str(weight)]/df_inst2[str(weight)], 
+        plt.scatter(df_merged["arand"], df_merged[str(weight)+"_ptr"]/df_merged[str(weight)+"_str"],
                     #labelhh=weight + i[0],marker=i[2],
                     label=weight,
-                    color=weight_colors[wc], 
+                    color=weight_colors[wc],
                     marker=marker)
-        plt.scatter(df_inst1["arand"], 
-                    (df_inst1[str(weight)+"80"]-df_inst1[str(weight)] )/ (df_inst2[str(weight)+"80"]-df_inst2[str(weight)] )
-                    , label=weight, color=weight_colors[wc], 
+        plt.scatter(df_merged["arand"],
+                    (df_merged[str(weight)+"80_ptr"]-df_merged[str(weight)+"_ptr"] )/ (df_merged[str(weight)+"80_str"]-df_merged[str(weight)+"_str"] )
+                    , label=weight, color=weight_colors[wc],
                     marker=marker)
-                    
+
                     #marker='o')
         wc+=1
     #"""
