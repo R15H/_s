@@ -3824,6 +3824,7 @@ def simple_weight():
     #MULTI=False
     if MULTI:
         RESULT_FOLDER="multiIII100"
+    processed_binaries = set()
     def simp(data,r):
         global writes
         EIGHT_MODE=False
@@ -3834,6 +3835,11 @@ def simple_weight():
 
             return
         benchset = data[r]['0']['benchset']
+        # When MULTI is enabled, only process each binary once to ensure deterministic output
+        if MULTI:
+            if this_binary in processed_binaries:
+                return
+            processed_binaries.add(this_binary)
         if benchset != "npb_result-iter":
             print("skip")
         else:
@@ -3865,11 +3871,13 @@ def simple_weight():
                 print(len(i[k][SKIP_START:]),k, "lol")
                 i[k] = i[k][SKIP_START:]
         
-        agg_keys = ['count', 'address', 'accessBracket', 'stallCyclesMLPLoad']
+        agg_keys = ['count', 'address', 'accessBracket', 'stallCyclesMLPLoad', 'totalTime', 'stallTime', 'lastStallTime']
         agg = load_aggregate_fields(data, r)
         #agg = load_aggregate_fields(data, r, '80')
+        agg80 = load_aggregate_fields(data, r, '80')
         for k in agg_keys:
             agg[k] = agg[k]
+            agg80[k] = agg80[k]
 
         if(len(load_inst_fields(data, r )['totalTime']) != len(load_inst_fields(data, r )['address']) ):
                         print("big mistake!!")
@@ -3910,6 +3918,8 @@ def simple_weight():
 
 
                     rs.append(ru)
+                    if ru == r:
+                        continue  # r's data is already in agg/agg80, skip to avoid self-duplication
                     for k in keys_used:
                         try:
 
@@ -3920,9 +3930,13 @@ def simple_weight():
                                 print("FAILED??")
                                 exit(0)
                     for k in agg_keys:
-                        v =  np.concatenate((agg[k], load_aggregate_fields(data, r)[k]))
-                        agg[k] = v
-                        break
+                        try:
+                            v =  np.concatenate((agg[k], load_aggregate_fields(data, ru)[k]))
+                            agg[k] = v
+                            v80 = np.concatenate((agg80[k], load_aggregate_fields(data, ru, '80')[k]))
+                            agg80[k] = v80
+                        except:
+                            pass
                 
             print("Used", len(rs), "for ", data[r]['0']['bench'].split("/")[-1])
             if len(rs) == 1:
@@ -3952,7 +3966,8 @@ def simple_weight():
         """
         if not ignore_inst:
             print("Unique addresses:", np.unique(i['address']))
-        agg = load_aggregate_fields(data, r)
+        if not MULTI:
+            agg = load_aggregate_fields(data, r)
         #agg = load_aggregate_fields(data, r,'80')
         #uniq_add = np.sort(np.unique(add[add < 140000000000335 ]))
         uniq_add = np.sort(np.unique(agg['address'][agg['address'] < 140000000000335 ]))
@@ -4125,14 +4140,16 @@ def simple_weight():
                     inst_priority.append(mlpWeighted)
                 """
 
-            agg = load_aggregate_fields(data, r)
+            if not MULTI:
+                agg = load_aggregate_fields(data, r)
+                agg80 = load_aggregate_fields(data, r, '80')
+            # When MULTI, agg and agg80 come from outer scope (already merged across all matching runs)
             #gu = load_global_fields(data, r)
             #slowdown = np.mean(load_global_fields(data, r, '80')['cycles'])*100/np.mean(load_global_fields(data, r, '0')['cycles'])
-            agg80 = load_aggregate_fields(data, r, '80')  # was not passing the 80 here...
             #print(data[r]['80']['line'])
             try:
-                zero = _proccess_inst(addr,agg)    
-                eighty = _proccess_inst(addr,agg80)    
+                zero = _proccess_inst(addr,agg)
+                eighty = _proccess_inst(addr,agg80)
             except Exception as e:    
                 print(e)
                 import traceback
@@ -4165,7 +4182,10 @@ def simple_weight():
         extra += "_80" if EIGHT_MODE else ""
         if OLD_V4:
             extra += "_v4"
-        extra += str(writes) + "-" + str(len(rs))
+        if not MULTI:
+            extra += str(writes) + "-" + str(len(rs))
+        else:
+            extra += "-" + str(len(rs))
         writes+=1
         fname=f"{FIGS_FOLDER}/{RESULT_FOLDER}/{benchset}-{bench}{extra}"
         print("WRITE TO", fname, nr_stores)
