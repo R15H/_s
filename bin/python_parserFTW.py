@@ -4132,7 +4132,14 @@ def simple_weight():
             #print(data[r]['80']['line'])
             try:
                 zero = _proccess_inst(addr,agg)    
-                eighty = _proccess_inst(addr,agg80)    
+                eighty = ""
+                """
+                try:
+                    eighty = _proccess_inst(addr,agg80)    
+                except:
+                    print("ERROR: 80 latency not available for this run..")
+                    eighty = ""
+                """
             except Exception as e:    
                 print(e)
                 import traceback
