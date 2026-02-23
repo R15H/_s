@@ -3797,6 +3797,32 @@ def psw___(): # plot syntehthic weights
     print(df)
     print("bru")
 
+    # --- Print extrema: where the Ptr Chase / Streaming ratio is highest and lowest ---
+    print("\n" + "="*70)
+    print("RATIO EXTREMA  (Ptr Chase / Streaming)")
+    print("="*70)
+    for weight in FIELDSSS:
+        ratio     = df_merged[str(weight)+"_ptr"] / df_merged[str(weight)+"_str"]
+        delta_ptr = df_merged[str(weight)+"80_ptr"] - df_merged[str(weight)+"_ptr"]
+        delta_str = df_merged[str(weight)+"80_str"] - df_merged[str(weight)+"_str"]
+        delta_ratio = delta_ptr / delta_str
+
+        idx_max = ratio.idxmax()
+        idx_min = ratio.idxmin()
+        d_idx_max = delta_ratio.idxmax()
+        d_idx_min = delta_ratio.idxmin()
+
+        print(f"\n  [{weight}]  raw ratio")
+        print(f"    MAX  ratio={ratio[idx_max]:.4f}  arand={int(df_merged.loc[idx_max, 'arand'])}  aptr={int(df_merged.loc[idx_max, 'aptr'])}  "
+              f"(ptr={df_merged.loc[idx_max, str(weight)+'_ptr']:.1f}  str={df_merged.loc[idx_max, str(weight)+'_str']:.1f})")
+        print(f"    MIN  ratio={ratio[idx_min]:.4f}  arand={int(df_merged.loc[idx_min, 'arand'])}  aptr={int(df_merged.loc[idx_min, 'aptr'])}  "
+              f"(ptr={df_merged.loc[idx_min, str(weight)+'_ptr']:.1f}  str={df_merged.loc[idx_min, str(weight)+'_str']:.1f})")
+        print(f"  [{weight}]  delta ratio (80-base)")
+        print(f"    MAX  ratio={delta_ratio[d_idx_max]:.4f}  arand={int(df_merged.loc[d_idx_max, 'arand'])}  aptr={int(df_merged.loc[d_idx_max, 'aptr'])}  "
+              f"(d_ptr={delta_ptr[d_idx_max]:.1f}  d_str={delta_str[d_idx_max]:.1f})")
+        print(f"    MIN  ratio={delta_ratio[d_idx_min]:.4f}  arand={int(df_merged.loc[d_idx_min, 'arand'])}  aptr={int(df_merged.loc[d_idx_min, 'aptr'])}  "
+              f"(d_ptr={delta_ptr[d_idx_min]:.1f}  d_str={delta_str[d_idx_min]:.1f})")
+    print("="*70)
 
 
     
