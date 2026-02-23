@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from ctypes  import *
 import collections
 global_only = False
