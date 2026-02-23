@@ -11,6 +11,7 @@ from scipy import stats
 import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
 
+
 # KNOB — defaults (overridable via command-line arguments)
 import argparse as _ap
 _p = _ap.ArgumentParser(description="python_parserFTW knobs")
@@ -43,6 +44,7 @@ LLC_ONLY            = _args.llc_only
 REGRESS_SOAR        = _args.regress_soar
 NO_WINSOR           = _args.no_winsor
 TRACE_MODE          = _args.trace_mode if _args.trace_mode is not None else sys.maxsize
+ 
 #KEYS_TO_DO = ['Instruction Store Bound + Load Stall Cycles/MLP']
 def ALL_DESIRED_KEYS(globy):
     #return  '∆ Load/Store bound cycles' in key.lower()
@@ -3817,6 +3819,7 @@ def simple_weight():
     global RUN_DATA_FOLDER
     global OLD_V4
     RESULT_FOLDER="maps"
+    INSTRUCTION_ONLY_MODE = False
     OLD_V4=True
     OLD_V4=False
     if OLD_V4:
@@ -3843,8 +3846,6 @@ def simple_weight():
         this_binary = data[r]['0']['bench'].split("/")[-1]
         print(this_binary, "THI SBINARY")
         if TARGET_BIN and TARGET_BIN not in this_binary:
-            print("WOW")
-
             return
         benchset = data[r]['0']['benchset']
         if benchset != "npb_result-iter":
@@ -3898,6 +3899,7 @@ def simple_weight():
 
         if MULTI :
             if '0' not in data[r]:
+                print('humm 0 not in data!')
                 return
             #if data[r]['0']['benchset'] == 'npb_result':
             for ru in data:
@@ -3942,6 +3944,7 @@ def simple_weight():
                 pass
                 #return
         else:
+            print("Not multi we die")
             return
             pass
             #return
@@ -4145,7 +4148,14 @@ def simple_weight():
             #print(data[r]['80']['line'])
             try:
                 zero = _proccess_inst(addr,agg)    
-                eighty = _proccess_inst(addr,agg80)    
+                eighty = ""
+                """
+                try:
+                    eighty = _proccess_inst(addr,agg80)    
+                except:
+                    print("ERROR: 80 latency not available for this run..")
+                    eighty = ""
+                """
             except Exception as e:    
                 print(e)
                 import traceback
@@ -4167,7 +4177,7 @@ def simple_weight():
             out += process_inst(addr)
         """
         actually_added = len(list(filter(lambda x: x != "", results)))
-        out = "".join(results)
+        out = "\n".join(results)
 
 
         
@@ -4217,11 +4227,13 @@ def simple_weight():
             f.write(do_compressed(inst_priority, uniq_add)) # keep same priority
 
     data = load_bench_data()
-    return iterate_over_benches(data, simp)
+    #return iterate_over_benches(data, simp, reject= lambda x,y: False)
 
-    iterate_over_benches(data, simp ,
+    return iterate_over_benches(data, simp ,
                          reject= lambda data,r :  all( [ a not in data[r]['0']['line'] for a in [ 
-                             'synt'
+                             'gapbs/bc' 
+                             # "synt"
+                             #'cg.D' 
                                                                                                 # 'syn'
                                                                                                  ]])#'sp.B' ]] ) # sroms', 'pr', 'lbm','cact',  'bc']])
                          )  # 'bwaves'
