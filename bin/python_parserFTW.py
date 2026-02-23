@@ -3786,7 +3786,7 @@ def psw___(): # plot syntehthic weights
 
     plt.xlabel("Number of reads")
     plt.ylabel("Weight")
-    plt.legend()
+    #plt.legend()
     plt.xlim(0,130)
     #plt.ylim(0)
 
@@ -3823,7 +3823,7 @@ def simple_weight():
     TARGET_BIN = None
     #MULTI=False
     if MULTI:
-        RESULT_FOLDER="multiIII100"
+        RESULT_FOLDER="_mu"
     def simp(data,r):
         global writes
         EIGHT_MODE=False
@@ -3865,7 +3865,7 @@ def simple_weight():
                 print(len(i[k][SKIP_START:]),k, "lol")
                 i[k] = i[k][SKIP_START:]
         
-        agg_keys = ['count', 'address', 'accessBracket', 'stallCyclesMLPLoad']
+        agg_keys = ['count', 'address', 'accessBracket', 'stallCyclesMLPLoad',  'totalTime', 'stallTime', 'lastStallTime']
         agg = load_aggregate_fields(data, r)
         #agg = load_aggregate_fields(data, r, '80')
         for k in agg_keys:
@@ -3920,9 +3920,9 @@ def simple_weight():
                                 print("FAILED??")
                                 exit(0)
                     for k in agg_keys:
-                        v =  np.concatenate((agg[k], load_aggregate_fields(data, r)[k]))
+                        v =  np.concatenate((agg[k], load_aggregate_fields(data, ru)[k]))
                         agg[k] = v
-                        break
+                        ####### WHY BREAK break
                 
             print("Used", len(rs), "for ", data[r]['0']['bench'].split("/")[-1])
             if len(rs) == 1:
@@ -3952,7 +3952,7 @@ def simple_weight():
         """
         if not ignore_inst:
             print("Unique addresses:", np.unique(i['address']))
-        agg = load_aggregate_fields(data, r)
+        #agg = load_aggregate_fields(data, r) ---- if multi is being used no need to use this.. 
         #agg = load_aggregate_fields(data, r,'80')
         #uniq_add = np.sort(np.unique(add[add < 140000000000335 ]))
         uniq_add = np.sort(np.unique(agg['address'][agg['address'] < 140000000000335 ]))
@@ -4125,7 +4125,7 @@ def simple_weight():
                     inst_priority.append(mlpWeighted)
                 """
 
-            agg = load_aggregate_fields(data, r)
+            #agg = load_aggregate_fields(data, r) from MULTI ple runs 
             #gu = load_global_fields(data, r)
             #slowdown = np.mean(load_global_fields(data, r, '80')['cycles'])*100/np.mean(load_global_fields(data, r, '0')['cycles'])
             agg80 = load_aggregate_fields(data, r, '80')  # was not passing the 80 here...
@@ -4204,9 +4204,13 @@ def simple_weight():
             f.write(do_compressed(inst_priority, uniq_add)) # keep same priority
 
     data = load_bench_data()
+    return iterate_over_benches(data, simp)
 
     iterate_over_benches(data, simp ,
-                         reject= lambda data,r :  all( [ a not in data[r]['0']['line'] for a in ['syn']])#'sp.B' ]] ) # sroms', 'pr', 'lbm','cact',  'bc']])
+                         reject= lambda data,r :  all( [ a not in data[r]['0']['line'] for a in [ 
+                             'synt'
+                                                                                                # 'syn'
+                                                                                                 ]])#'sp.B' ]] ) # sroms', 'pr', 'lbm','cact',  'bc']])
                          )  # 'bwaves'
     # 'bwaves' not in data[r]['0']['line'] and
 

@@ -119,22 +119,48 @@ _execute_gem5(){
 
 
 }
+short_executions(){
+    awk '/STARTED/ {a[$1$2$3$4$5$6$7$8$9$10] = $14;  next; } /TERMINATED/{if( ($15 -  a[$1$2$3$4$5$6$7$8$9$10]) <= 120) {print $0}; print $0 ; delete a[$1$2$3$4$5$6$7$8$9$10]; next;   } ' results_gem5/gem5_pids.txt 
+    awk '/STARTED/ {a[$1$2$3$4$5$6$7$8$9$10] = $14;  next; } /TERMINATED/{if( ($15 -  a[$1$2$3$4$5$6$7$8$9$10]) >= 3600) {print $0}; print $0 ; delete a[$1$2$3$4$5$6$7$8$9$10]; next;   } ' results_gem5/gem5_pids.txt 
+     awk '/STARTED/ {a[$1$2$3$4$5$6$7$8$9$10] = $14;  next; } /TERMINATED/{if( ($15 -  a[$1$2$3$4$5$6$7$8$9$10]) >= 10) {print $0};  delete a[$1$2$3$4$5$6$7$8$9$10]; next;   } {print "RUNNING " $0 } ' results_gem5/gem5_pids.txt
+
+     awk '/STARTED/ {a[$1$2$3$4$5$6$7$8$9$10] = $14;  next; } /TERMINATED/{print $10 " " $15 -  a[$1$2$3$4$5$6$7$8$9$10];  next;   } END {   for (key in a) {
+        print "Unmatched STARTED for key '" key "': " a[key] " (no TERMINATED found)"
+    } } ' results_gem5/gem5_pids.txt
+
+    awk '/STARTED/ {b[$1$2$3$4$5$6$7$8$9$10]= $0; a[$1$2$3$4$5$6$7$8$9$10] = $14;  next; } /TERMINATED/{if($15 -  a[$1$2$3$4$5$6$7$8$9$10] > 10) {print $0 } ;  next;   } END {   for (key in a) {
+    print b[key]
+    } } ' results_gem5/gem5_pids.txt > _
+    cat _ >results_gem5/gem5_pids.txt 
+    # one_more_gem5
+
+}
+
+current_runs(){
+gpids="/mnt/nas/inesc/ist196723/osdi26/results_gem5/gem5_pids.txt" 
+# +2382
+tail -n +1644 $gpids 
+}
+
+
 
 wait_for_space(){
     while true; do 
         # sleep random number of seconds between 1 and 60
-        sleep $((RANDOM % 30 + 1))
+        #sleep $((RANDOM % 6 + 1))
         echo "busy"
         # how many gem5 processes are currently running?
         gpids="/mnt/nas/inesc/ist196723/osdi26/results_gem5/gem5_pids.txt"
-        gem5_done=$(cat $gpids | grep $(hostname) | grep TERMINATED | wc -l)
-        gem5_started=$(cat $gpids | grep $(hostname) | grep STARTED | wc -l)
+        gem5_done=$(current_runs | grep $(hostname) | grep TERMINATED | wc -l)
+        gem5_started=$(current_runs | grep $(hostname) | grep STARTED | wc -l)
         gem5_count=$(($gem5_started - $gem5_done))
         echo "on going: $gem5_count done: $gem5_done started: $gem5_started"
         # get NR of GBs of dram this server has
-        if [ $gem5_count -lt 8 ]; then
+        if [ $gem5_count -lt 13 ]; then
+            #sleep $((RANDOM % 2 + 1))
             break
         fi
+        sleep $((RANDOM % 1 + 1))
     done
 }
 slout(){ # see last outputs
@@ -184,6 +210,7 @@ get_gem5_cmd_line(){
                 GEM5=/bench/userspace/benchmarks/gemm5/gem5/buildO/build/X86/gem5.fast
                 GEM5=/mnt/nas/inesc/ist196723/gem5.end
                 GEM5=/mnt/nas/inesc/ist196723/gem5.endGOOD
+                GEM5=/mnt/nas/inesc/ist196723/gem5.fast
                 #bench/userspace/benchmarks/gemm5/gem5/buildO/build/X86/gem5.fast
 
                 CONFIG=/bench/copyyy_bento.py
@@ -222,15 +249,15 @@ rungem5_with_report(){
 
 synthethics_all_80(){
 
-    DRAM=2
-    source $nas/latency_benchmark/tests_syn/plot_time_math/plot.sh
+    DRAM=1
+    source $nas/latency_benchmark/tests_syn/plot_time_math/plot2.sh
 
 
         owo
         update_program_variables
     benchnr=41000
-                for reds in 1 10 100; do
-        for ratio in 1 2 4 16 32 ; do
+                for reds in  10 1 100; do
+        for ratio in 0,5 1 2 4 8; do # 32 100; do
                         #loops=$((3000*)) # 3 million reads of each
                         aptr=$reds
                         arand=$((reds*ratio))
@@ -239,17 +266,77 @@ synthethics_all_80(){
                         update_program_variables
                         exec=$BINARY
                         WORKDIR="$nas/latency_benchmark/tests_syn/plot_time_math"
-                        BINARY="$WORKDIR/outa"
+                        BINARY="$WORKDIR/outa"  ########################################################################################
 
                         benchset="synthethic_extended-$arand-$aptr-"
                         ARGS="$args"; STDIN=""; WORKDIR="$WORKDIR"; # size=simsmall
-                        SKIP_SECONDS=40
-                        TIMEOUT_SECONDS=120 # 2 minutes 
-                    _do_gem5_skip 80
+                        SKIP_SECONDS=50
+                        TIMEOUT_SECONDS=60 # 1 minutes 
+                    #_do_gem5_skip 0  ########################################################################################
+                    #_do_gem5_skip 80
+                    #exit
+
+                    #exit
 
         benchnr=$(($benchnr+1))
                 done
-done
+                done
+
+                for reds in  1 2 4 8 16 32 64 128 256 512; do
+                        #loops=$((3000*)) # 3 million reads of each
+                        aptr=0
+                        arand=$((reds))
+                        looops=10000000000
+                        loops=1000000000
+                        update_program_variables
+                        exec=$BINARY
+                        WORKDIR="$nas/latency_benchmark/tests_syn/plot_time_math"
+                        BINARY="$WORKDIR/outa"  ########################################################################################
+
+                        benchset="synthethic_extended-$arand-$aptr-"
+                        ARGS="$args"; STDIN=""; WORKDIR="$WORKDIR"; # size=simsmall
+                        SKIP_SECONDS=50
+                        TIMEOUT_SECONDS=60 # 1 minutes 
+                   _do_gem5_skip 0  ########################################################################################
+                    _do_gem5_skip 80
+                    #exit
+
+                    #exit
+
+        benchnr=$(($benchnr+1))
+                done
+
+                for reds in  1 2 4 8 16 32 64 128 256 512; do
+                        #loops=$((3000*)) # 3 million reads of each
+                        aptr=$((reds))
+                        arand=$((reds))
+                        looops=10000000000
+                        loops=1000000000
+                        update_program_variables
+                        exec=$BINARY
+                        WORKDIR="$nas/latency_benchmark/tests_syn/plot_time_math"
+                        BINARY="$WORKDIR/outa"  ########################################################################################
+
+                        benchset="synthethic_extended-$arand-$aptr-"
+                        ARGS="$args"; STDIN=""; WORKDIR="$WORKDIR"; # size=simsmall
+                        SKIP_SECONDS=50
+                        TIMEOUT_SECONDS=60 # 1 minutes 
+                    _do_gem5_skip 0  ########################################################################################
+                    _do_gem5_skip 80
+                    #exit
+
+                    #exit
+
+        benchnr=$(($benchnr+1))
+                done
+
+
+
+
+
+
+
+                sleep 120
 }
 synthethics_all(){
     DRAM=2
@@ -294,6 +381,7 @@ setup_big(){
 
 }
 # TODO
+
 machine_learn(){
 
 BINARY="/mnt/nas/inesc/ist196723/benchmarks/liblinear-multicore-2.47/datasets/../train"; ARGS="-s 0 -c 1 -e 0.01  /mnt/nas/inesc/ist196723/benchmarks/liblinear-multicore-2.47/datasets/webspam_wc_normalized_unigram.svm"; STDIN=""; WORKDIR="/"; # size=simsmall
@@ -301,16 +389,164 @@ BINARY="/mnt/nas/inesc/ist196723/benchmarks/liblinear-multicore-2.47/datasets/..
     SKIP_SECONDS=0
     DRAM=2
 setup_big
-    benchnr='7000000'
+    benchnr='7000001'
 _do_gem5_skip
+    SKIP_SECONDS=50
+_do_gem5_skip
+    benchnr='7000002'
+    SKIP_SECONDS=100
+_do_gem5_skip
+    benchnr='7000003'
+    SKIP_SECONDS=200
+_do_gem5_skip
+
+
 }
+
+
+over_math(){
+    DRAM=1
+    id=1000
+    #$dock create_container gem5
+    #for bench in "${synthethic_benches[@]}"; do
+    benchset="THE_syntehthic-STATMATH"
+    SKIP_SECONDS=15
+    TIMEOUT_SECONDS=60000 #86400000 # 100 da
+    mm=0
+    benchnr="777000$mm"
+    for mm in 1 2 4 8 16 32 64; do
+        ARGS="$mm 0 4 100 0 100 100 200 099999900 2 0 0 0 000000 0 splitted_math optimal" STDIN="" WORKDIR="/" # size=simsmall    64
+        BINARY="/mnt/nas/inesc/ist196723/latency_benchmark/tests_syn/plot_time_math/outa-$mm" 
+        #_do_gem5_skip
+        _do_gem5_skip $1
+        benchnr=$(($benchnr+1))
+    done
+    return
+    benchset="THE_syntehthic-DYNMATH"
+    BINARY="/mnt/nas/inesc/ist196723/latency_benchmark/tests_syn/plot_time_math/outa-DYN" 
+    mm=0
+    for mm in 1 2 4 8 16 32 64; do
+        ARGS="$mm 0 4 100 0 100 100 200 099999900 2 0 0 0 000000 0 splitted_math optimal" STDIN="" WORKDIR="/" # size=simsmall    64
+        benchnr="777000$mm"
+        _do_gem5_skip
+        #_do_gem5_skip 80
+        benchnr=$(($benchnr+1))
+    done
+
+}
+
+over_latency(){
+
+ DRAM=1
+    id=1000
+    #$dock create_container gem5
+    #for bench in "${synthethic_benches[@]}"; do
+    benchset="THE_syntehthic"
+    benchnr="2099"
+    BINARY="/mnt/nas/inesc/ist196723/latency_benchmark/tests_syn/plot_time_math/outa" 
+    ARGS="0 0 4 100 0 10 100 200 032250000 2 0 0 0 000000 0 splitted optimal" STDIN="" WORKDIR="/" # size=simsmall    64
+    ARGS="0 0 4 100 0 5 20 200 032250000 2 0 0 0 000000 0 splitted optimal"
+        #get_plot_run $bench
+        i=88888
+        for i in 0 80; do
+        echo -
+        done
+
+special_ptr_chase
+math 
+
+}
+
+graphy(){
+
+    DRAM=4
+    benchset='1GB_GRAPH'
+    SKIP_SECONDS=60
+    benchnr='97000'
+    TIMEOUT_SECONDS=86400000 # 100 days
+    #kron23
+    g="kron23"
+BINARY="/mnt/nas/inesc/ist196723/gapbs/bc"; ARGS="-f /mnt/nas/inesc/ist196723/gapbs/$g.sg -n 40000"; STDIN=""; WORKDIR="/"; # size=simsmall
+#_do_gem5_skip
+#_do_gem5_skip 80
+SKIP_SECONDS=61
+benchnr=$(($benchnr+1))
+BINARY="/mnt/nas/inesc/ist196723/gapbs/bfs"; ARGS="-f /mnt/nas/inesc/ist196723/gapbs/$g.sg -n 40000"; STDIN=""; WORKDIR="/"; # size=simsmall
+#_do_gem5_skip
+#_do_gem5_skip 80
+SKIP_SECONDS=62
+benchnr=$(($benchnr+1))
+BINARY="/mnt/nas/inesc/ist196723/gapbs/bc"; ARGS="-f /mnt/nas/inesc/ist196723/gapbs/$g.sg -n 4000"; STDIN=""; WORKDIR="/"; # size=simsmall
+#_do_gem5_skip
+#_do_gem5_skip 80
+SKIP_SECONDS=63
+benchnr=$(($benchnr+1))
+BINARY="/mnt/nas/inesc/ist196723/gapbs/bc"; ARGS="-f /mnt/nas/inesc/ist196723/gapbs/$g.sg -n 4000"; STDIN=""; WORKDIR="/"; # size=simsmall
+#_do_gem5_skip
+#_do_gem5_skip 80
+SKIP_SECONDS=64
+benchnr=$(($benchnr+1))
+BINARY="/mnt/nas/inesc/ist196723/gapbs/bc"; ARGS="-f /mnt/nas/inesc/ist196723/gapbs/$g.sg -n 4000"; STDIN=""; WORKDIR="/"; # size=simsmall
+#_do_gem5_skip
+#_do_gem5_skip 80
+SKIP_SECONDS=65
+benchnr=$(($benchnr+1))
+BINARY="/mnt/nas/inesc/ist196723/gapbs/bc"; ARGS="-f /mnt/nas/inesc/ist196723/gapbs/$g.sg -n 4000"; STDIN=""; WORKDIR="/"; # size=simsmall
+#_do_gem5_skip
+#_do_gem5_skip 80
+SKIP_SECONDS=66
+benchnr=$(($benchnr+1))
+BINARY="/mnt/nas/inesc/ist196723/gapbs/bc"; ARGS="-f /mnt/nas/inesc/ist196723/gapbs/$g.sg -n 4000"; STDIN=""; WORKDIR="/"; # size=simsmall
+#_do_gem5_skip
+#_do_gem5_skip 80
+for SKIP_SECONDS in 70 81 92 103 113; do # 124 135 146; do
+	benchnr=$(($benchnr+1))
+	_do_gem5_skip
+	_do_gem5_skip 80
+done
+
+
+
+}
+
+npb_final1(){
+    skip="$1"
+    DRAM=10
+    benchnr=1880002
+    benchnr='10'
+    TIMEOUT_SECONDS=10 # 100 days
+    for SKIP_SECONDS in $skip; do
+        benchnr=$(($benchnr+1))
+        BINARY="/mnt/nas/inesc/ist196723/benchmarks/NPB-CPP/NPB-OMP/bin/cg.D"; ARGS=""; STDIN=""; WORKDIR="/"; # size=simsmall
+        _do_gem5_skip
+    done
+
+}
+
+np1(){
+npb_final1 "0 30 50 60 80 90"
+}
+np2(){
+npb_final1 "100 110 120  140 150 160 170 180 190" # 130
+}
+echo hiiiiiiuuuiuiui
+np5(){
+npb_final1 "512 543 587" # 5\90 5\60"  5\30
+}
+np4(){
+npb_final1 "400 420 450 470 490"
+}
+np3(){
+npb_final1 "200 210 220  240 250  270 280 290"
+}
+
 
 
 npb_final(){
 
-    DRAM=16
-    benchset='npb_result'
-    SKIP_SECONDS=200
+    DRAM=4
+    benchset='npb_result-iter'
+    SKIP_SECONDS=50
     benchnr='15333'
     TIMEOUT_SECONDS=8640000 # 100 days
     BINARY="/mnt/nas/inesc/ist196723/benchmarks/NPB-CPP/NPB-OMP/bin/ft.D"; ARGS=""; STDIN=""; WORKDIR="/"; # size=simsmall
@@ -333,13 +569,104 @@ benchnr=$(($benchnr+1))
 #_do_gem5_skip
 BINARY="/mnt/nas/inesc/ist196723/benchmarks/NPB-CPP/NPB-OMP/bin/mg.C"; ARGS=""; STDIN=""; WORKDIR="/"; # size=simsmall
 benchnr=$(($benchnr+1))
-_do_gem5_skip
+#_do_gem5_skip
 BINARY="/mnt/nas/inesc/ist196723/benchmarks/NPB-CPP/NPB-OMP/bin/cg.D"; ARGS=""; STDIN=""; WORKDIR="/"; # size=simsmall
 benchnr=$(($benchnr+1))
 #_do_gem5_skip
 BINARY="/mnt/nas/inesc/ist196723/benchmarks/NPB-CPP/NPB-OMP/bin/sp.D"; ARGS=""; STDIN=""; WORKDIR="/"; # size=simsmall
 benchnr=$(($benchnr+1))
 #_do_gem5_skip
+benchnr=1600000
+SKIP_SECONDS=1
+#_do_gem5_skip
+BINARY="/mnt/nas/inesc/ist196723/benchmarks/NPB-CPP/NPB-OMP/bin/cg.D"; ARGS=""; STDIN=""; WORKDIR="/"; # size=simsmall
+benchnr=1600001
+SKIP_SECONDS=1000
+#_do_gem5_skip
+benchnr=1600002
+SKIP_SECONDS=500
+BINARY="/mnt/nas/inesc/ist196723/benchmarks/NPB-CPP/NPB-OMP/bin/cg.D"; ARGS=""; STDIN=""; WORKDIR="/"; # size=simsmall
+#_do_gem5_skip
+
+
+BINARY="/mnt/nas/inesc/ist196723/benchmarks/NPB-CPP/NPB-OMP/bin/mg.C"; ARGS=""; STDIN=""; WORKDIR="/"; # size=simsmall
+SKIP_SECONDS=50
+benchnr=1920000
+#_do_gem5_skip 80
+#_do_gem5_skip 
+SKIP_SECONDS=51
+benchnr=$(($benchnr+1))
+#_do_gem5_skip 80
+#_do_gem5_skip 
+SKIP_SECONDS=52
+benchnr=$(($benchnr+1))
+#_do_gem5_skip 80
+#_do_gem5_skip 
+SKIP_SECONDS=53
+benchnr=$(($benchnr+1))
+#_do_gem5_skip 80
+#_do_gem5_skip 
+SKIP_SECONDS=54
+benchnr=$(($benchnr+1))
+#_do_gem5_skip 80
+#_do_gem5_skip 
+SKIP_SECONDS=55
+benchnr=$(($benchnr+1))
+#_do_gem5_skip 80
+#_do_gem5_skip 
+SKIP_SECONDS=56
+benchnr=$(($benchnr+1))
+#_do_gem5_skip 80
+#_do_gem5_skip 
+SKIP_SECONDS=57
+benchnr=$(($benchnr+1))
+#_do_gem5_skip 80
+#_do_gem5_skip 
+SKIP_SECONDS=58
+benchnr=$(($benchnr+1))
+#_do_gem5_skip 80
+#_do_gem5_skip 
+SKIP_SECONDS=59
+benchnr=1920000
+#_do_gem5_skip 80
+#_do_gem5_skip 
+SKIP_SECONDS=60
+benchnr=$(($benchnr+1))
+#_do_gem5_skip 80
+#_do_gem5_skip 
+SKIP_SECONDS=62
+benchnr=$(($benchnr+1))
+#_do_gem5_skip 80
+#_do_gem5_skip 
+SKIP_SECONDS=63
+benchnr=$(($benchnr+1))
+#_do_gem5_skip 80
+#_do_gem5_skip 
+SKIP_SECONDS=64
+benchnr=$(($benchnr+1))
+#_do_gem5_skip 80
+#_do_gem5_skip 
+SKIP_SECONDS=65
+benchnr=$(($benchnr+1))
+#_do_gem5_skip 80
+#_do_gem5_skip 
+SKIP_SECONDS=66
+benchnr=$(($benchnr+1))
+#_do_gem5_skip 80
+#_do_gem5_skip 
+SKIP_SECONDS=67
+benchnr=$(($benchnr+1))
+#_do_gem5_skip 80
+#_do_gem5_skip 
+SKIP_SECONDS=68
+benchnr=$(($benchnr+1))
+#_do_gem5_skip 80
+DRAM=10
+BINARY="/mnt/nas/inesc/ist196723/benchmarks/NPB-CPP/NPB-OMP/bin/cg.D"; ARGS=""; STDIN=""; WORKDIR="/"; # size=simsmall
+for SKIP_SECONDS in  200 300 500 600 700 800 900 1000; do 
+benchnr=$(($benchnr+1))
+	_do_gem5_skip 
+done
 
 }
 
@@ -371,18 +698,22 @@ _do_gem5
 
 DRAM=8
 _do_gem5_skip(){
-                if [ $1 -eq "80" ]; then
-                increase=80
+    increase=$1
+                #if [[ "x$1" -eq "x80" ]]; then
+                #increase=80
+                #return
 
-                else
-                increase=0
+                #else
+                #increase=0
                 #exit
-                fi
+                #fi
                 GEM5=$nas/gem5.end
                 GEM5=/bench/userspace/benchmarks/gemm5/gem5/buildO/build/X86/gem5.fast
                 GEM5=/mnt/nas/inesc/ist196723/gem5.end
                 GEM5=/mnt/nas/inesc/ist196723/gem5.endGOOD
+                GEM5=/mnt/nas/inesc/ist196723/gem5.fastWELL
                 #bench/userspace/benchmarks/gemm5/gem5/buildO/build/X86/gem5.fast
+                GEM5=/mnt/nas/inesc/ist196723/gem5.fast
 
                 CONFIG=/bench/copyyy_bento.py
                 CONFIG=$nas/copyyy_bento.py
@@ -396,18 +727,25 @@ _do_gem5_skip(){
 
     {
                 now_time=$(date +%s)
-                    $GEM5 $CONFIG "$BINARY" --latency-increase $increase --bargs "$ARGS" --cpu-start KVM --dramsize=${DRAM}GiB --bstdin "$STDIN" --skip_start_duration $SKIP_SECONDS --exec_timeout $TIMEOUT_SECONDS 2> $nas/osdi26/results_gem5/err_$benchset\_$benchnr\_$increase\_ 1>$nas/osdi26/results_gem5/output_$benchset\_$benchnr\_$increase\_ & 
+                    echo $nas/osdi26/results_gem5/err_$benchset\_$benchnr\_$increase\_ 
+                    echo $nas/osdi26/results_gem5/output_$benchset\_$benchnr\_$increase\_ 
+                    $GEM5 $CONFIG "$BINARY" --latency-increase $increase --bargs "$ARGS" --cpu-start KVM --dramsize=${DRAM}GiB --bstdin "$STDIN" --skip_start_duration $SKIP_SECONDS --exec_timeout $TIMEOUT_SECONDS 2>   $nas/osdi26/results_gem5/err_$benchset\_$benchnr\_$increase\_  > $nas/osdi26/results_gem5/err_$benchset\_$benchnr\_$increase\_   &
+                    #1>$nas/osdi26/results_gem5/output_$benchset\_$benchnr\_$increase\_ & 
                     pid=$!
                     echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) STARTED $now_time" >> $nas/osdi26/results_gem5/gem5_pids.txt
                     wait $pid
+                    cat $nas/osdi26/results_gem5/err_$benchset\_$benchnr\_$increase\_ 
                     echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) TERMINATED $? $now_time" >> $nas/osdi26/results_gem5/gem5_pids.txt
     } &
+    sleep 1 # give time to write to the gem5 file...
     disown #keep it running even if the shell dies
     return
                     increase=80
     {
         set +xe
                 now_time=$(date +%s)
+                    echo $nas/osdi26/results_gem5/err_$benchset\_$benchnr\_$increase\_ 
+                    echo $nas/osdi26/results_gem5/output_$benchset\_$benchnr\_$increase\_ 
                     $GEM5 $CONFIG "$BINARY" --latency-increase $increase --bargs "$ARGS" --cpu-start KVM --dramsize=8GiB --bstdin "$STDIN" --skip_start_duration $SKIP_SECONDS --exec_timeout $TIMEOUT_SECONDS 2> $nas/osdi26/results_gem5/err_$benchset\_$benchnr\_$increase\_ 1>$nas/osdi26/results_gem5/output_$benchset\_$benchnr\_$increase\_ & 
                     pid=$!
                     echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) STARTED $now_time" >> $nas/osdi26/results_gem5/gem5_pids.txt
@@ -418,10 +756,14 @@ _do_gem5_skip(){
 
 }
 _do_gem5(){
+    set +ex
+    DRAM=8
                 GEM5=$nas/gem5.end
                 GEM5=/bench/userspace/benchmarks/gemm5/gem5/buildO/build/X86/gem5.fast
                 GEM5=/mnt/nas/inesc/ist196723/gem5.end
                 GEM5=/mnt/nas/inesc/ist196723/gem5.endGOOD
+                GEM5=/mnt/nas/inesc/ist196723/gem5.fastWELL
+                GEM5=/mnt/nas/inesc/ist196723/gem5.fast
                 #bench/userspace/benchmarks/gemm5/gem5/buildO/build/X86/gem5.fast
 
                 CONFIG=/bench/copyyy_bento.py
@@ -434,25 +776,34 @@ _do_gem5(){
 
     {
                 now_time=$(date +%s)
+                    echo $nas/osdi26/results_gem5/err_$benchset\_$benchnr\_$increase\_ 
+                    echo $nas/osdi26/results_gem5/output_$benchset\_$benchnr\_$increase\_ 
                     $GEM5 $CONFIG "$BINARY" --latency-increase $increase --bargs "$ARGS" --cpu-start KVM --dramsize=${DRAM}GiB --bstdin "$STDIN" 2> $nas/osdi26/results_gem5/err_$benchset\_$benchnr\_$increase\_ 1>$nas/osdi26/results_gem5/output_$benchset\_$benchnr\_$increase\_ & 
                     pid=$!
                     echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) STARTED $now_time" >> $nas/osdi26/results_gem5/gem5_pids.txt
+                    echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) STARTED $now_time" >> ~/gem5_pids.txt
                     wait $pid
                     echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) TERMINATED $? $now_time" >> $nas/osdi26/results_gem5/gem5_pids.txt
+                    echo "STILL ALIVE"
     } &
     disown #keep it running even if the shell dies
-    return
+    #return
                     increase=80
     {
         set +xe
                 now_time=$(date +%s)
+                    echo $nas/osdi26/results_gem5/err_$benchset\_$benchnr\_$increase\_ 
+                    echo $nas/osdi26/results_gem5/output_$benchset\_$benchnr\_$increase\_ 
                     $GEM5 $CONFIG "$BINARY" --latency-increase $increase --bargs "$ARGS" --cpu-start KVM --dramsize=8GiB --bstdin "$STDIN" 2> $nas/osdi26/results_gem5/err_$benchset\_$benchnr\_$increase\_ 1>$nas/osdi26/results_gem5/output_$benchset\_$benchnr\_$increase\_ & 
                     pid=$!
                     echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) STARTED $now_time" >> $nas/osdi26/results_gem5/gem5_pids.txt
+                    echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) STARTED $now_time" >> ~/gem5_pids.txt
                     wait $pid 
                     echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) TERMINATED $? $now_time" >> $nas/osdi26/results_gem5/gem5_pids.txt
+                    echo "STILL ALIVEOO"
     } &
     disown
+    echo "Done launching..."
 
 }
 
@@ -773,33 +1124,265 @@ check_status() {
 lockfile="$nas/osdi26/lock"
 launch_or_skip_one(){
     bench_nr=$1
-    if cat results_gem5/gem5_pids.txt | grep "benchnr: $bench_nr"; then
+
+    #must_do="$(cat $nas/osdi26/must_do | head -n 5)"
+    # remove the first line
+    #sed -i '5d' $nas/osdi26/must_do
+    #for b in $must_do; do
+    #    $nas/osdi26/controller.sh iterate_benches benches_final _do_gem5 $b  &
+    #done
+    ##sleep $((RANDOM % 5 + 1))
+    #return
+
+
+
+    #DRAM=4
+    
+    set +ex
+    if current_runs | grep "benchnr: $bench_nr"; then #cat results_gem5/gem5_pids.txt
+        echo "skipping $bench_nr"
+        return
+    fi
+    echo SLEEPING
+    sleep 1
+    echo HUMM
+    sleep $((RANDOM % 21 + 1))
+    echo DONE_SLEEP?
+    if current_runs | grep "benchnr: $bench_nr"; then
         echo "skipping $bench_nr"
         return
     fi
     $nas/osdi26/controller.sh iterate_benches benches_final _do_gem5 $bench_nr  &
+    echo ALIVOOO?
+    return 0
 }
 
 do_all_big(){
-    cp $nas/osdi26/big_benches $nas/osdi26/benches_final
+    #cp $nas/osdi26/big_benches $nas/osdi26/benches_final
     $nas/osdi26/controller.sh getr 2>/dev/null  | awk '{print $NF}' | while read -r line; do
         bench_nr=$line
         wait_for_space # only select the bench after we are reading to compute! otherwise its a race condition!
         $nas/osdi26/controller.sh  launch_or_skip_one $bench_nr &
         sleep 2 
+        
     done
+
+}
+
+l3(){
+
+    $nas/osdi26/controller.sh iterate_benches benches_finalNATIVE test_l3_events
+}
+
+stall_cycles(){
+    $nas/osdi26/controller.sh iterate_benches benches_finalNATIVE test_stalls_many #1 0009 # do all file
+    #$nas/osdi26/controller.sh iterate_benches benches_finalNATIVE test_stalls #1 0 # do all non file
+
+    #$nas/osdi26/controller.sh iterate_benches benches_finalNATIVE test_stalls #16 1
+    #$nas/osdi26/controller.sh iterate_benches benches_finalNATIVE test_stalls 8 1
+    #$nas/osdi26/controller.sh iterate_benches benches_finalNATIVE test_stalls #16 0009
+    #$nas/osdi26/controller.sh iterate_benches benches_finalNATIVE test_stalls 8 0009
+
+    #$nas/osdi26/controller.sh iterate_benches benches_finalNATIVE test_stalls 4
+}
+
+# remove last line of all the specified files
+remove_last_line(){
+    for f in $(ls .); do
+        tail -n +2 "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+    done
+}
+# wc -l ./*  
+
+
+
+
+######## SEGMENT A JOB BY TYPES...
+_do_test_(){
+    b=0
+    check=$2
+    #for a in $ARGS; do
+    #numactl --membind 1 ${VMTOUCH} -m 60G -f -t $a  
+    #    b=0009
+    #done
+    #if [[ $b == $check ]]; then
+    #    return
+    #fi
+    sleep 1
+    echo "RUNNING $threads $TIER $benchnr" 
+    # 1 min = single thread  initialization! 
+    sudo perf stat -e $evts -o $nas/osdi26/bin/real_stalls/$benchset\_$benchnr\_$TIER.log -- numactl --membind=$TIER_ --physcpubind=0,15 env OMP_NUM_THREADS=$threads   $BINARY $ARGS  < $STDIN
+    echo "Ran!"
+    cat $nas/osdi26/bin/real_stalls/$benchset\_$benchnr\_$TIER.log | grep stalls_l3_miss >> $nas/osdi26/bin/real_stalls/count
+    cat $nas/osdi26/bin/real_stalls/$benchset\_$benchnr\_$TIER.log | grep bound_on_stores  >> $nas/osdi26/bin/real_stalls/countANY
+    cat $nas/osdi26/bin/real_stalls/$benchset\_$benchnr\_$TIER.log | grep stalls_total  >> $nas/osdi26/bin/real_stalls/countTOTAL
+    cat $nas/osdi26/bin/real_stalls/$benchset\_$benchnr\_$TIER.log | grep "seconds time elapsed"  | awk '{print $1}' >> $nas/osdi26/bin/real_stalls/countTIME
+    cat $nas/osdi26/bin/real_stalls/$benchset\_$benchnr\_$TIER.log | grep cycles >> $nas/osdi26/bin/real_stalls/countCYCLES
+    echo $benchset >> $nas/osdi26/bin/real_stalls/benchset
+    echo $benchnr >> $nas/osdi26/bin/real_stalls/benchnr
+    echo $BINARY >> $nas/osdi26/bin/real_stalls/binary
+    echo "$ARGS $STDIN" >> $nas/osdi26/bin/real_stalls/ARGS
+    echo "$TIER" >> $nas/osdi26/bin/real_stalls/mode
+    echo "$threads" >> $nas/osdi26/bin/real_stalls/threads 
+}
+
+test_stalls_many(){
+
+    #test_stalls 8 0
+
+    test_stalls 1 0009
+    test_stalls 16 0009
+    #test_stalls 8 0009
+    #test_stalls 1 0
+    #test_stalls 16 0
+    #test_stalls 8 0009
+    #test_stalls 8 0
+}
+test_stalls(){
+    threads=$1
+    set +xe
+    sudo /home/ist196723/memtis/memtis-userspace/scripts/set_uncore_freq.sh on
+    touch ho
+    #echo oooooooooooo $BINARY
+    #return
+    if [[ -z $STDIN ]]; then
+        STDIN=ho
+    fi
+    
+
+    pushd $WORKDIR
+    #now=$(date +%s)
+    evts="cycle_activity.stalls_l3_miss,exe_activity.bound_on_stores,cycle_activity.stalls_total,cycles"
+    TIER=FAST
+    TIER_=0
+    _do_test_ $2
+    TIER=SLOW
+    TIER_=1
+    _do_test_ $2
+
+    if [ -f ~/stop ]; then
+        echo "STOPPING"
+        exit
+    fi
+    return 
+
+    #sudo perf stat -e $evts -o $nas/osdi26/bin/real_stalls/$benchset\_$benchnr\_SLOW.log -- numactl --membind=1 --physcpubind=0,15 env OMP_NUM_THREADS=$threads   $BINARY $ARGS  < $STDIN
+    #cycle_activity.stalls_total
+
+    echo $benchset >> $nas/osdi26/bin/real_stalls/benchset
+    echo $benchnr >> $nas/osdi26/bin/real_stalls/benchnr
+    echo $BINARY >> $nas/osdi26/bin/real_stalls/binary
+    echo "$ARGS $STDIN" >> $nas/osdi26/bin/real_stalls/ARGS
+    echo "SLOW" >> $nas/osdi26/bin/real_stalls/mode
+    echo "$threads" >> $nas/osdi26/bin/real_stalls/threads 
+    cat $nas/osdi26/bin/real_stalls/$benchset\_$benchnr\_SLOW.log | grep stalls_l3_miss >> $nas/osdi26/bin/real_stalls/count
+    cat $nas/osdi26/bin/real_stalls/$benchset\_$benchnr\_SLOW.log | grep stalls_any >> $nas/osdi26/bin/real_stalls/countANY
+    cat $nas/osdi26/bin/real_stalls/$benchset\_$benchnr\_SLOW.log | grep cycles >> $nas/osdi26/bin/real_stalls/countCYCLES
+    # GREP TIME
+    #cat $nas/osdi26/bin/real_stalls/$benchset\_$benchnr\_SLOW.log | grep stalls_l3_miss >> $nas/osdi26/bin/real_stalls/count
+
+    if [ -f ~/stop ]; then
+        echo "STOPPING"
+        exit
+    fi
+    
+
+
+}
+
+test_l3_events(){
+    # STDIN
+    set +xe
+    sudo /home/ist196723/memtis/memtis-userspace/scripts/set_uncore_freq.sh on
+    touch ho
+    #echo oooooooooooo $BINARY
+    #return
+    if [[ -z $STDIN ]]; then
+        STDIN=ho
+    fi
+    
+
+    pushd $WORKDIR
+    sudo perf stat -e mem_load_retired.l3_miss -o $nas/osdi26/bin/real/$benchset\_$benchnr\_FAST.log -- numactl --membind=0 --cpunodebind=0 env OMP_NUM_THREADS=1   $BINARY $ARGS  < $STDIN
+    cat $nas/osdi26/bin/real/$benchset\_$benchnr\_FAST.log | grep mem_ >> $nas/osdi26/bin/real/count
+    echo $benchset >> $nas/osdi26/bin/real/benchset
+    echo $benchnr >> $nas/osdi26/bin/real/benchnr
+    echo $BINARY >> $nas/osdi26/bin/real/binary
+    echo "$ARGS $STDIN" >> $nas/osdi26/bin/real/ARGS
+    echo "FAST" >> $nas/osdi26/bin/real/mode
+    sudo perf stat -e mem_load_retired.l3_miss -o $nas/osdi26/bin/real/$benchset\_$benchnr\_SLOW.log -- numactl --membind=1 --cpunodebind=0 env OMP_NUM_THREADS=1   $BINARY $ARGS  < $STDIN
+
+
+    echo $benchset >> $nas/osdi26/bin/real/benchset
+    echo $benchnr >> $nas/osdi26/bin/real/benchnr
+    echo $BINARY >> $nas/osdi26/bin/real/binary
+    echo "$ARGS $STDIN" >> $nas/osdi26/bin/real/ARGS
+    echo "SLOW" >> $nas/osdi26/bin/real/mode
+    cat $nas/osdi26/bin/real/$benchset\_$benchnr\_SLOW.log | grep mem_ >> $nas/osdi26/bin/real/count
+
+    if [ -f ~/stop ]; then
+        echo "STOPPING"
+        exit
+    fi
+
+    #$nas/osdi26/controller.sh getr 2>/dev/null  | awk '{print $NF}' | while read -r line; do
 
 }
 
 do_all(){
-    cp $nas/osdi26/benches_final_backup $nas/osdi26/benches_final
+    #cp $nas/osdi26/benches_final_backup $nas/osdi26/benches_final
     #| grep -v 20.sg | grep -E 'lulesh|btree|XSBench|NPB|liblinear' 
-    $nas/osdi26/controller.sh getr 2>/dev/null  | awk '{print $NF}' | while read -r line; do
+    #$nas/osdi26/controller.sh getr 2>/dev/null  | awk '{print $NF}' | 
+    while read -r line; do
+    echo " ---------------"
+    echo "$line"
         bench_nr=$line
+        echo $bench_nr
+    echo " ---------------"
+        echo $bench_nr
+        echo $bench_nr
+        echo $bench_nr
         wait_for_space # only select the bench after we are reading to compute! otherwise its a race condition!
-        $nas/osdi26/controller.sh  launch_or_skip_one $bench_nr &
+        #echo DISOWNED IT
+        echo DISOWNED IT
+        echo DISOWNED IT
+        #edisown
+        set +xe
+
+#        {
+#            #disown
+{
+            sleep 1
+            echo BEFORE LAUNCH
+                $nas/osdi26/controller.sh  launch_or_skip_one $bench_nr    2>/dev/null 1>/dev/null  < /dev/null
+}
+#                echo Launched it
+#        } 
+        #disown
+        echo DISOWNED IT
+        echo DISOWNED IT
+        echo DISOWNED IT
+        echo DISOWNED IT
+        echo DISOWNED IT
+        echo DISOWNED IT
+        echo DISOWNED IT
+        #sleep 30
+        echo DISOWNED IT
+        echo DISOWNED IT
+        echo DISOWNED IT
+        echo DISOWNED IT
+        echo DISOWNED IT
+        echo DISOWNED IT
+        echo DISOWNED IT
+        echo DISOWNED IT
+        echo DISOWNED IT
+        echo STILL_ITERATING_THROUGH_BENCHES
+        echo $bench_nr
         sleep 2 
-    done
+        echo "humm"
+    #    $nas/osdi26/controller.sh getr
+    #    echo "this is what you get"
+    done < <($nas/osdi26/controller.sh getr 2>/dev/null  | awk '{print $NF}' )
 }
 
 
@@ -1178,7 +1761,7 @@ break_down_overheads(){
 default_memtis_settings(){
     sudo sh -c "echo disabled > /sys/kernel/mm/htmm/htmm_weighted_sampling"
     sudo sh -c "echo disabled > /sys/kernel/mm/htmm/htmm_skip_cooling"            # REMOVE IT 
-     echo 199 | sudo tee /sys/kernel/mm/htmm/htmm_sample_period
+     echo 1500 | sudo tee /sys/kernel/mm/htmm/htmm_sample_period
     echo 100007 |sudo  tee /sys/kernel/mm/htmm/htmm_inst_sample_period
     echo 1 | sudo tee /sys/kernel/mm/htmm/htmm_thres_hot
     echo 2 | sudo tee /sys/kernel/mm/htmm/htmm_split_period
@@ -1198,7 +1781,7 @@ default_memtis_settings(){
     echo 500 | sudo tee /sys/kernel/mm/htmm/htmm_promotion_period_in_ms
     echo 4 | sudo tee /sys/kernel/mm/htmm/htmm_gamma
     ###  cpu cap (per mille) for ksampled
-    echo 99 | sudo tee /sys/kernel/mm/htmm/ksampled_soft_cpu_quota
+    echo 0 | sudo tee /sys/kernel/mm/htmm/ksampled_soft_cpu_quota
 }
 
 
@@ -1756,7 +2339,7 @@ pp_run(){
     canon_name="$(basename "$source_map" | cut -f1 -d" " )"
     #dest_source_map="$source_map_dir/$(basename "$source_map" | cut -f1 -d" " )"
     #cp "$source_map" $dest_source_map #bfs 64.txt" 
-    cp "$source_map" /home/ist196723/latencymaps/$canon_name 
+    #cp "$source_map" /home/ist196723/latencymaps/$canon_name 
     #sudo sh -c "echo enabled > /sys/kernel/mm/htmm/htmm_skip_cooling"            # REMOVE IT 
     sudo sh -c "echo enabled > /sys/kernel/mm/htmm/htmm_weighted_sampling"
     ############ THE FIELD IS NOT COUNTING WITH THE INSTRUCTION!
@@ -1796,6 +2379,14 @@ set_mode(){
 
     
 
+to_file_run_call(){
+    binary="$1"
+    MODE="$2"
+    folder="$3"
+    FAST_DRAM="$4"
+    ARGS="$5"
+    to_file_run
+}
 
 to_file_run(){
     now_in_seconds=$(date +%s)
@@ -1830,6 +2421,7 @@ to_file_run(){
     promoted=$(cat /proc/vmstat | grep htmm_nr_promoted | awk '{print $2}')
     demoted=$(cat /proc/vmstat | grep htmm_nr_demoted | awk '{print $2}')
     run_memtis $FAST_DRAM "$BINARY" 1 $ARGS   #| tee >(collect_blocked_time_data "$MODE") 
+
     cat /proc/vmstat
     # delta promoted and delta demoted
     promoted2=$(cat /proc/vmstat | grep htmm_nr_promoted | awk '{print $2}')
@@ -1850,7 +2442,7 @@ to_file_run(){
         cat  /sys/fs/cgroup/htmm/memory.numa_stat >> $folder/real_data/batch/STATS-"$MODE"
         cat /sys/fs/cgroup/htmm/memory.hotness_stat >> $folder/real_data/batch/STATS-"$MODE"
         } 
-        sleep 0.25
+        sleep 2
         done
     } &
 
@@ -1859,7 +2451,7 @@ to_file_run(){
     ##perf stat -e mem_load_l3_miss_retired.local_dram,mem_load_l3_miss_retired.remote_dram  -p $bench_pid -o "real_data/batch/PERF-$MODE" 
     # perf already waits for the process to finish
     sleep 2
-    sudo  perf stat -e '{cycle_activity.stalls_l3_miss:u,INST_RETIRED.ANY:u}' -I 500  -o $folder/perf_"$MODE" -p $bench_pid  
+    sudo  perf stat -e '{cycle_activity.stalls_l3_miss:u,INST_RETIRED.ANY:u,ocr.all_data_rd.l3_miss_local_dram.any_snoop,ocr.all_data_rd.l3_miss_remote_dram.any_snoop}' -I 1000  -o $folder/perf_"$MODE" -p $bench_pid  
     #wait $bench_pid
     echo "DONE"
     kill $monitor_pid
@@ -1939,7 +2531,7 @@ set_bfs(){
 set_bc(){
     local_graph="/mnt/nas/inesc/ist196723/gapbs/benchmark/graphs/kron.sg"
     BINARY="/mnt/nas/inesc/ist196723/gapbs/bc"; ARGS="-f $local_graph -n 50"; STDIN=""; WORKDIR="/"; # size=simsmall    64
-    source_map="/home/ist196723/nas/osdi26/final_data/maps_human/best/bc 64.txt"
+    source_map="/home/ist196723/latencymaps/bc" # /home/ist196723/latencymaps/bc" #nas/osdi26/final_data/maps_human/best/bc 64.txt"
 }
 set_mode__(){
     binary=$(basename "$BINARY")
@@ -2036,14 +2628,16 @@ tw(){
         for local_graph in "/mnt/nas/inesc/ist196723/gapbs/benchmark/graphs/twitterU.sg" "/mnt/nas/inesc/ist196723/gapbs/benchmark/graphs/kron.sg" "/mnt/nas/inesc/ist196723/gapbs/benchmark/graphs/urand.sg"; do
         graph="$local_graph"
         set_bfs
+        set_bc
         for FAST_DRAM in 0 1000 5000 2500 10000 50000; do
-            for FIELD in 6 5 7 8 9; do
+            for FIELD in 4; do #6 5 7 8 9
                 pp_run
             done
             nm_run
             # run all in cxl
             #cxl_run
         done
+        continue
             now_in_seconds=$(date +%s)
             SYSTEM="NUMACTL_SLOW-$now_in_seconds"
             set_mode
@@ -2355,10 +2949,68 @@ BINARY="/mnt/nas/inesc/ist196723/gapbs/bfs"; ARGS="-f /mnt/nas/inesc/ist196723/g
 }
 
 
+cg(){
+        #exec="/mnt/nas/inesc/ist196723/benchmarks/XSBench/openmp-threading/XSBench"
+        #args="-t 1 -p 500000 -G hash -h 1000000 -s XL -b read
+        #exec="/mnt/nas/inesc/ist196723/benchmarks/XSBench/openmp-threading/XSBench"
+        args=""
+        echo 8 > /tmp/omp_num_threads
+     bench="cg.D"
+        bench="mg.C"
+        exec="/mnt/nas/inesc/ist196723/benchmarks/NPB-CPP/NPB-OMP/bin/$bench"
+    sudo ~/memtis/memtis-userspace/scripts/set_uncore_freq.sh on # FORGOT that changed "on" to "off"!  1h!
+
+
+     # cp ~/nas/osdi26/final_data/maps/* ~/latencymaps/
+      #cp ~/nas/osdi26/final_data/multi/npb_result-cg.D ~/latencymaps/cg.D
+      cp ~/nas/osdi26/final_data/multi/npb_result-mg.C ~/latencymaps/mg.C
+     #
+     for i in 1 2 3 4 5 6 7 8 9 0; do 
+
+        #5000 4000 1500 6000 7000
+          DRAMS="1000 2000 3000"
+          for DRAM in  $DRAMS; do # 1500 3000 2000 2500; do
+          FAST_DRAM=$DRAM
+          binary="$exec"
+          #to_file_run | 
+          default_memtis_settings
+          #        FIELD=0
+                 echo "8" > /tmp/omp_num_threads
+
+            THREAD_MODE="NO_HT"
+            BASE="32_bit"
+            COOL="DECAY_new_map"
+            MODE="$THREAD_MODE-$BASE-$COOL-$DRAM-$i-0"
+            #run_time=$(run_memtis $DRAM "$exec" 1 $args |  awk ' /Time in seconds/ {r=$5; } /Mop/ {l=$4} END {print r " " l}')
+            #echo $run_time $DRAM $memory $bench $FIELD $THREAD_MODE $BASE $COOL noll | tee -a promising_results
+            #memtis_weighted
+            for FIELD in  4; do
+            #sudo sh -c "echo 3 > /proc/sys/vm/drop_caches"
+            #echo $FIELD
+            sudo sh -c "echo $FIELD > /sys/kernel/mm/htmm/htmm_weight_field"
+            sudo sh -c "echo enabled > /sys/kernel/mm/htmm/htmm_weighted_sampling"
+            args=""
+                run_time=$( to_file_run "$binary" "$MODE" "$folder" "$FAST_DRAM" "$args" |  awk ' /Time in seconds/ {r=$5; } /Mop/ {l=$4} END {print r " " l}')
+                echo $run_time $DRAM $memory $bench $FIELD $THREAD_MODE $BASE $COOL noll | tee -a /mnt/nas/inesc/ist196723/osdi26/promising_results
+            default_memtis_settings
+            FIELD=0
+            MODE="$THREAD_MODE-$BASE-$COOL-$DRAM-$i-4"
+
+                run_time=$( to_file_run "$binary" "$MODE" "$folder" "$FAST_DRAM" "$args" |  awk ' /Time in seconds/ {r=$5; } /Mop/ {l=$4} END {print r " " l}')
+
+            echo $run_time $DRAM $memory $bench $FIELD $THREAD_MODE $BASE $COOL noll | tee -a /mnt/nas/inesc/ist196723/osdi26/promising_results
+          done
+  done
+  done
+}
+
+
+
 if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
-  echo "Script is being sourced"
+  #echo "Script is being sourced"
+  echo "" > /dev/null
 else
-  echo "Script is being executed"
+  #echo "Script is being executed"
  "$@"
 fi
 
@@ -2390,3 +3042,4 @@ fi
 
 #
 #
+

@@ -48,18 +48,26 @@ struct FinalMetrics{
     bool isStore : 1;
 };
 */
+/*
+
+        if (global_stat_bound != 0) *bound = global_stat_bound;
+        if (inst_stat_bound != 0) *bound = inst_stat_bound;
+        if (aggregate_bound != 0) *bound = aggregate_bound;
+*/
 
 #define SPLIT_STRUCT_STAT_FIELDS(struct_name, field_name, type) \
     sprintf(filename, "%s_" #struct_name "_" #field_name "_%d.txt", destination_folder, run_number); \
-    file = fopen(filename, "w"); \
+    bound = (strcmp(#struct_name, "global_stat") == 0) ? global_stat_bound : (strcmp(#struct_name, "instruction_data") == 0) ? inst_stat_bound : aggregate_bound;\
+    file = NULL; \
+    if( bound ) file = fopen(filename, "w"); \
     if (file == NULL){ \
-        printf("Error opening file\n"); \
-        return; \
-    }\
-    for (int i = 0; i < global_stat_bound; i++){ \
-        fwrite(&struct_name[i].field_name, sizeof(type), 1, file); \
-    }\
-    fclose(file);\
+        printf("Err-stat"); \
+    } else { \
+        for (int i = 0; i < bound; i++){ \
+            fwrite(&struct_name[i].field_name, sizeof(type), 1, file); \
+        }\
+        fclose(file);\
+    } \ 
     ;
 
 // same macro again, but for the bool fields that have only 1 bit each
@@ -362,9 +370,9 @@ size_t global_stat_size;
 size_t inst_stat_size;
 size_t aggregate_size;
 
-size_t global_stat_bound;
-size_t inst_stat_bound;
-size_t aggregate_bound;
+size_t global_stat_bound = NULL;
+size_t inst_stat_bound = NULL;
+size_t aggregate_bound = NULL;
 
 #include <errno.h>
 
@@ -461,9 +469,9 @@ int open_file(const char *filename, char **mmap_ptr, size_t size, size_t *bound)
             printf("PERM\n");
         }
         printf("Error getting file size. Assuming its the same as the previous file..\n");
-        if (global_stat_bound != 0) *bound = global_stat_bound;
-        if (inst_stat_bound != 0) *bound = inst_stat_bound;
-        if (aggregate_bound != 0) *bound = aggregate_bound;
+        //if (global_stat_bound != 0) *bound = global_stat_bound;
+        //if (inst_stat_bound != 0) *bound = inst_stat_bound;
+        //if (aggregate_bound != 0) *bound = aggregate_bound;
         return -1;
     }
     *mmap_ptr = mmap(NULL, *bound * size, PROT_READ, MAP_PRIVATE, fd, 0); 
@@ -496,8 +504,16 @@ struct run {
 void split_structs_to_files(int run_number){
     // for each field in struct GlobalStatsss, create a file and write the values
     char filename[1024];
+    size_t bound; 
     FILE *file;
+
     // name = global_stat_FIELDNAME_RUNNUMBER.txt
+    //
+	//uint64_t commitedL3Misses; 
+    SPLIT_STRUCT_STAT_FIELDS(global_stat, totalMLPsummed, uint64_t);
+    SPLIT_STRUCT_STAT_FIELDS(global_stat, totalL3MLPsummed, uint64_t);
+    SPLIT_STRUCT_STAT_FIELDS(global_stat, totalAccessTimeSummed, uint64_t);
+    SPLIT_STRUCT_STAT_FIELDS(global_stat, commitedL3Misses, uint64_t);
     SPLIT_STRUCT_STAT_FIELDS(global_stat, stallCyclesMLPLoad, uint64_t);
     SPLIT_STRUCT_STAT_FIELDS(global_stat, stallCyclesMLPStore, uint64_t);
     SPLIT_STRUCT_STAT_FIELDS(global_stat, stallCyclesMLPBoth, uint64_t);
@@ -544,7 +560,7 @@ void split_structs_to_files(int run_number){
     SPLIT_STRUCT_STAT_FIELDS(instruction_data, stallCyclesMLPLoad, uint32_t   );
     SPLIT_STRUCT_STAT_FIELDS(instruction_data,  stallCyclesMLPStore, uint64_t   );
 
-    SPLIT_STRUCT_STAT_FIELDS(instruction_data, L3stallCyclesMLPLoad, uint64_t   );
+    SPLIT_STRUCT_STAT_FIELDS(instruction_data, L3stallCyclesMLPLoad, uint32_t   );
 
     //SPLIT_STRUCT_STAT_FIELDS(instruction_data,  L3stallCyclesMLPStore, uint64_t   );
 
@@ -621,7 +637,7 @@ int main(int argc, char **argv){
     // if any of these fail, exit
     if (global_file == -1 || inst_file == -1 || aggregate_file == -1){
         printf("Error opening files\n");
-        return -1;
+        //return -1;
     }
 
     // get basename of argv[1]
@@ -630,8 +646,12 @@ int main(int argc, char **argv){
     char *bname = basename(argv[1]);
     char *token1 = strtok(bname, "_");  // Gets "global"
     char *token2 = strtok(NULL, "_"); // Gets "NR"
+    char *token3 = strtok(NULL, "_"); // Gets "host"
+    char *token4 = strtok(NULL, "_"); // Gets time stamp
+    // remove trailing .txt
+    token4[strcspn(token4, ".txt")] = 0;
     int pid_number = atoi(token2);
-    sprintf(destination_folder, "/mnt/nas/inesc/ist196723/osdi26/results_gem5/%d/", pid_number);
+    sprintf(destination_folder, "/mnt/nas/inesc/ist196723/osdi26/results_gem5/%d-%s/", pid_number, token3);
     printf("PID: %s Destination folder: %s\n",token2, destination_folder);
 
 
