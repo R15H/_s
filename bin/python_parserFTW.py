@@ -29,8 +29,12 @@ _p.add_argument("--no-winsor",        action="store_true",  default=False,      
 _p.add_argument("--trace-mode",       type=int,             default=None,           help="TRACE_MODE (default: sys.maxsize). Integer value.")
 _p.add_argument("--function",       type=str,             default=None,           help="FUNCTION (default: None)")
 _p.add_argument("-skip_gem5"       )
+_p.add_argument("-data-instruction-only", help="Instruct to build statistics using only PEBS's emulator data"       )
+_p.add_argument("--ooutput-folder",  type=str, default=None, help="Override output folder"       )
+_p.add_argument("-old_v4"       )
 _args, _unknown = _p.parse_known_args()
 
+OLD_V4 = _args.old_v4
 LIMIT_BY_AGG       = _args.limit_by_agg
 DATASET_S           = _args.dataset_s
 OVERRIDE_PID_ONLY   = _args.override_pid_only
@@ -45,6 +49,8 @@ LLC_ONLY            = _args.llc_only
 REGRESS_SOAR        = _args.regress_soar
 NO_WINSOR           = _args.no_winsor
 TRACE_MODE          = _args.trace_mode if _args.trace_mode is not None else sys.maxsize
+OVERRIDE_OUTPUT_FOLDER = _args.ooutput_folder
+INSTRUCTION_ONLY = _args.ooutput_folder
 def ALL_DESIRED_KEYS(globy):
     #return  ' Load/Store bound cycles' in key.lower()
     return False
@@ -772,7 +778,6 @@ def plot_llc_change():
     #; count = []; binary = []; mode = []; benchset_names =[]; 
     return llc_changes
 
-OLD_V4 = True
 
 def all_over_time_real():
     master_file="over_time_files"
@@ -3418,7 +3423,6 @@ def plot_sy():
 
     
 
-OLD_V4=False
 
     
 
@@ -3812,15 +3816,11 @@ def psw___(): # plot syntehthic weights
 
 
     
-def simple_weight():
+def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignore_inst = True):
     global run_meta
     global DATA_FOLDER
     global RUN_DATA_FOLDER
-    global OLD_V4
     RESULT_FOLDER="maps"
-    INSTRUCTION_ONLY_MODE = False
-    OLD_V4=True
-    OLD_V4=False
     print("RUNNING SIMPLE_WEIGHT")
     if OLD_V4:
         RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/v4/results_gem5"
@@ -3829,17 +3829,13 @@ def simple_weight():
         RESULT_FOLDER="mapsv4"
         #data = load_bench_data()
     
-    ONLY_SYN=False
-
-    #print("Doing simple_weight")
-    #exit(0I#)
-    MULTI=True
-    TARGET_BIN = "cg.D"
-    TARGET_BIN = "sp.B"
-    TARGET_BIN = None
-    #MULTI=False
     if MULTI:
         RESULT_FOLDER="_mu"
+        RESULT_FOLDER="_mu_inst"
+    if OVERRIDE_OUTPUT_FOLDER: 
+        RESULT_FOLDER=OVERRIDE_OUTPUT_FOLDER
+    if INSTRUCTION_ONLY:
+        ignore_inst = INSTRUCTION_ONLY
     def simp(data,r):
         global writes
         EIGHT_MODE=False
@@ -3853,20 +3849,19 @@ def simple_weight():
         else:
             print("Found", TARGET_BIN)
             
-        #exit(0)
 
-        ignore_inst = True
         if not ignore_inst:
             i = load_inst_fields(data, r)
             if EIGHT_MODE:
                 i = load_inst_fields(data, r, '80')   # i80 = ... instead of i = ... <--------- HOURS LOST !
         else:
+            print(ignore_inst)
+            print("BRUV")
             i = 0
         benchset = data[r]['0']['benchset']
         print(benchset)
         print('benchname', data[r]['0']['bench'].split("/")[-1], data[r]['0']['benchnr'])
         #if "bc" not in data[r]['0']['bench'].split("/")[-1]:
-        #return
         print(benchset)
         if "synth" not in benchset and ONLY_SYN:
             return
@@ -3948,12 +3943,12 @@ def simple_weight():
             return
             pass
             #return
-
         for k in keys_used:
             if not ignore_inst:
                 print(len(i[k][SKIP_START:]),k)
 
 
+        print("HEIIIIIRE:::")
         bio = data[r]['0']['bench']
         print('benchname is ', bio)
         if not ignore_inst:
@@ -3968,14 +3963,23 @@ def simple_weight():
         """
         if not ignore_inst:
             print("Unique addresses:", np.unique(i['address']))
-        #agg = load_aggregate_fields(data, r) ---- if multi is being used no need to use this.. 
-        #agg = load_aggregate_fields(data, r,'80')
-        #uniq_add = np.sort(np.unique(add[add < 140000000000335 ]))
-        uniq_add = np.sort(np.unique(agg['address'][agg['address'] < 140000000000335 ]))
-        #uniq_add = np.sort(np.unique(i['address'])) # np.unique(agg['address'][agg['address'] < 140000000000335 ]))
-        if not ignore_inst:
-            if( len(np.unique(i['address'])) != len(np.unique(agg['address']))):
-                print("SADLY DIFF IS ", len(np.unique(i['address'])) - len(np.unique(agg['address'])), bio)
+
+        try:
+            uniq_add =   np.sort(np.unique(agg['address'][agg['address'] < 140000000000335 ])) if ignore_inst else  np.sort(np.unique(i['address']))
+            if not ignore_inst:
+                if( len(np.unique(i['address'])) != len(np.unique(agg['address']))):
+
+                    print("SADLY DIFF IS ", len(np.unique(i['address'])) - len(np.unique(agg['address'])), bio)
+        except Exception as e:
+            print(e)
+            import traceback
+            traceback.print_exc()
+            import traceback
+            traceback.print_exc()
+            exit(0)
+
+        print("Unique addresses:", len(uniq_add))
+
 
 
 
@@ -6806,7 +6810,10 @@ def get_field(run, struct,field_name, type_, convolve_skip=False, PID_ONLY=False
         print(candidates, 'candidates')
         raise Exception("No candidate found for timestamp", timestamp)
     """
+    #try
     arr =  np.fromfile(f"{folder_chosen}/_{struct}_{field_name}_{run['pid']}.txt", dtype=type_)
+    #except:
+    #raise Error("Could not load ", run['increase'], f"{folder_chosen}/_{struct}_{field_name}_{run['pid']}.txt" )
     #arr =  np.fromfile(f"{RUN_DATA_FOLDER}/{run['pid']}-{run['host']}/_{struct}_{field_name}_{run['pid']}.txt", dtype=type_)
     #print("Average window size", average_window_size)
     #print("convo", convolve_skip)
