@@ -1525,6 +1525,45 @@ def fino():
 
     plt.savefig("hurt_bckk" + bench + ".png")
     print(data)
+def extract_bala_cpu_time(filepath="/mnt/nas/inesc/ist196723/all_results"):
+    import re
+    import numpy as np
+    results = {}
+    with open(filepath, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line or "BALA" not in line:
+                continue
+            cols = line.split()
+            if len(cols) < 6:
+                continue
+            cpu_time = float(cols[0])
+            if cpu_time < 1:
+                continue
+            system_col = cols[4]
+            key = cols[5]
+            bench = cols[6] if len(cols) > 6 else ""
+            m = re.search(r'BALA_(\d+)', system_col)
+            if not m:
+                continue
+            bala_nr = int(m.group(1))
+            if bala_nr not in results:
+                results[bala_nr] = []
+            results[bala_nr].append({
+                'cpu_time': cpu_time,
+                'key': key,
+                'bench': bench,
+                'system': system_col,
+                'line': line,
+            })
+    print("BALA entries found:", {k: len(v) for k, v in results.items()})
+    for bala_nr in sorted(results.keys()):
+        entries = results[bala_nr]
+        times = [e['cpu_time'] for e in entries]
+        avg = np.mean(times)
+        print(f"  BALA_{bala_nr}: {len(entries)} runs, avg cpu_time={avg:.5f}, times={times}")
+    return results
+
 def clean_try():
     folder="/mnt/nas/inesc/ist196723"
     file ="all_results"
