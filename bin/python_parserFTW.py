@@ -6,6 +6,7 @@ success_run = 0
 MLP_PRECISION_FACTOR = 1024
 import matplotlib.pyplot as plt
 import sys
+modi=""
 
 from scipy import stats
 
@@ -28,7 +29,7 @@ _p.add_argument("--regress-soar",     action="store_true",  default=False,      
 _p.add_argument("--no-winsor",        action="store_true",  default=False,          help="Enable NO_WINSOR (default: False)")
 _p.add_argument("--trace-mode",       type=int,             default=None,           help="TRACE_MODE (default: sys.maxsize). Integer value.")
 _p.add_argument("--function",       type=str,             default=None,           help="FUNCTION (default: None)")
-_p.add_argument("-skip_gem5"       )
+_p.add_argument("--skip_gem5", action="store_true", default=False, help="Skip parsing gem5 data")
 _p.add_argument("-data-instruction-only", help="Instruct to build statistics using only PEBS's emulator data"       )
 _p.add_argument("--ooutput-folder",  type=str, default=None, help="Override output folder"       )
 _p.add_argument("-old_v4"       )
@@ -1244,6 +1245,7 @@ def all_over_time_real():
 def cdf_inst():
     RESULT_FOLDER="multi"
     RESULT_FOLDER="multiIII"
+    RESULT_FOLDER="_mu_inst"
     for MODE in "-": # "-freq_weighted" "":
         fname=f"{FIGS_FOLDER}/{RESULT_FOLDER}/"
         # for file in fname
@@ -3554,6 +3556,126 @@ class WEIGHT_FIELD(IntEnum):
         return field.value + (type_idx * 16)
 
 
+"""
+to run this do  
+python3 bin/python_parserFTW.py  --skip_gem5 --function "BALAsamp_cost()" 
+"""
+def BALAsamp_cost():
+
+        f = "/mnt/nas/inesc/ist196723/samp_cost" # file is two columns seperated by a space
+        f = "/mnt/nas/inesc/ist196723/samp_costCPU" # file is two columns seperated by a space
+        STOCK_COST = 946723000
+        STOCK_COST = 751623500
+        STOCK_COST = 158644000
+
+        STOCK_COST = 27003565221.2727279663   # CPU
+        STOCK_COST = 26759491419
+        #            26901141980
+        #            26522016577
+        #            28271254592.444442749
+        #            27247722672
+        intensity = []
+        cost = []
+        with open(f,'r') as file:
+            lines = file.readlines()
+
+            for l in lines:
+                intensity.append(int(l.split(" ")[0]))
+                cost.append(int(l.split(" ")[1]))
+        
+        intensity = np.array(intensity)
+        cost = np.array(cost)
+        
+        iii = []
+        ii = []
+        maps = { 
+            "1": 258,
+            "2": 645,
+"6": 1450,
+"16": 3155,
+"38": 6262,
+"90": 12551,
+"208": 25085,
+"490": 50356,
+"950": 85711,
+"2048": 156323,
+                }
+        plot_ci = True                  
+        ii_mean = []
+        ii_err = []
+
+        for i in np.unique(intensity):
+            mask = (intensity == i)
+            vals = cost[mask] * 100 / STOCK_COST
+
+            m = np.mean(vals)
+            s = np.std(vals, ddof=1)
+            n = np.sum(mask)
+
+            iii.append(maps[str(i)])
+            ii_mean.append(m)
+
+            if plot_ci and n > 1:
+                # 95% CI using t distribution
+                alpha = 0.95
+                tval = stats.t.ppf((1 + alpha) / 2, df=n - 1)
+                half_width = tval * s / np.sqrt(n)
+                ii_err.append(half_width)
+            else:
+                ii_err.append(0.0)
+
+        plt.figure()
+        plt.title("Augmented sampling overhead in function of weight map size")
+        plt.xscale('log')
+
+        if plot_ci:
+            plt.errorbar(iii, ii_mean, yerr=ii_err, fmt='o', capsize=3)
+        else:
+            plt.scatter(iii, ii_mean)
+        """
+        for i in np.unique(intensity):
+            iii.append(maps[str(i)])
+            ii.append(np.mean(cost[intensity == i])*100/STOCK_COST)
+            v = np.mean(cost[intensity == i])
+            print("mean", v)
+            print("std", np.std(cost[intensity == i]*100/v)) # within 3% 
+            print("nr", np.sum(intensity == i))
+            print(i, cost[intensity == i])
+        plt.figure()
+        plt.title("Augmented sampling overhead in function of weight map size")
+        plt.xscale('log')
+        plt.scatter(iii, ii)
+        """
+        plt.xlabel("Number of instructions")
+        plt.ylabel("CPU Overhead")
+        #plt.ylim(0, np.max(cost)/STOCK_COST)
+        plt.savefig(f"{FIGS_FOLDER}/../report/synthethic_cost_intensity.png")
+        plt.close()
+
+
+        """
+        with open(f,'r') as file:
+            lines = file.readlines()
+        bala_lines = [line for line in lines if "BALA" in line]
+        #df = pd.DataFrame([[s.strip() for s in line.split()] for line in lines], columns=["BALA_LINE"])
+        #print(df)
+
+        print(bala_lines)
+        """
+
+
+"""
+i need you to filter by rows that contain "BALA", you need to extract the XXX in BALA_XXX- 
+then, you need to get the CPU time used by each of the rows using the 6th row. this row acts as a key with the row that says "BALA". the file real_analysis shows how can the CPU time be extract using this two values
+
+48.67499 0 7050 0 MEMTIS-1-true-def_bcBALA_208-299 1771906514 bcu
+52.81740 0 7050 0 MEMTIS-1-true-def_bcBALA_38-299 1771906858 bcu
+52.70677 0 7050 0 MEMTIS-1-true-def_bcBALA_490-299 1771907219 bcu
+
+    pass
+"""
+
+
 
 """
 python3 bin/python_parser.py "simple_weight()"
@@ -3561,7 +3683,13 @@ python3 bin/python_parser.py "simple_weight()"
 writes=0
 def psw___(): # plot syntehthic weights 
     RESULT_FOLDER="/mnt/nas/inesc/ist196723/osdi26/final_data/multiIII100/synthethic_extended-*-*"
+    RESULT_FOLDER="/mnt/nas/inesc/ist196723/osdi26/final_data/_mu/synthethic_extended-*-*"
     #reads = [int(i) for i in  ("1 2 4 8 16 32 64 128 256 512 " * 2 ).split(" ") ] # arand only , combined,
+    
+    # Configuration for highlighting arand==10 points
+    HIGHLIGHT_ARAND_10 = True  # Control variable for highlighting arand==10 points
+    HIGHLIGHT_COLOR = 'red'    # Color for arand==10 points
+    HIGHLIGHT_SIZE = 120       # Marker size for arand==10 points (larger than default)
 
     _ = {}
     runs = glob.glob(RESULT_FOLDER)
@@ -3676,15 +3804,36 @@ def psw___(): # plot syntehthic weights
     #"""
     for weight in FIELDSSS:
         #print(df[inst_sel], "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD")
-        plt.scatter(df_merged["arand"], df_merged[str(weight)+"_ptr"]/df_merged[str(weight)+"_str"],
+        
+        # Create masks for regular and highlighted points
+        regular_mask = df_merged["arand"] != 10
+        highlight_mask = df_merged["arand"] == 10
+        
+        # Plot regular points
+        plt.scatter(df_merged["arand"][regular_mask], 
+                    (df_merged[str(weight)+"_ptr"]/df_merged[str(weight)+"_str"])[regular_mask],
                     #labelhh=weight + i[0],marker=i[2],
                     label=weight,
                     color=weight_colors[wc],
                     marker=marker)
-        plt.scatter(df_merged["arand"],
-                    (df_merged[str(weight)+"80_ptr"]-df_merged[str(weight)+"_ptr"] )/ (df_merged[str(weight)+"80_str"]-df_merged[str(weight)+"_str"] )
-                    , label=weight, color=weight_colors[wc],
+        plt.scatter(df_merged["arand"][regular_mask],
+                    ((df_merged[str(weight)+"80_ptr"]-df_merged[str(weight)+"_ptr"] )/ (df_merged[str(weight)+"80_str"]-df_merged[str(weight)+"_str"] ))[regular_mask]
+                    , label="_nolegend_", color=weight_colors[wc],
                     marker=marker)
+        
+        # Plot highlighted arand==10 points if enabled
+        if HIGHLIGHT_ARAND_10 and highlight_mask.any():
+            plt.scatter(df_merged["arand"][highlight_mask], 
+                        (df_merged[str(weight)+"_ptr"]/df_merged[str(weight)+"_str"])[highlight_mask],
+                        label="_nolegend_",
+                        color=HIGHLIGHT_COLOR,
+                        marker=marker,
+                        s=HIGHLIGHT_SIZE)
+            plt.scatter(df_merged["arand"][highlight_mask],
+                        ((df_merged[str(weight)+"80_ptr"]-df_merged[str(weight)+"_ptr"] )/ (df_merged[str(weight)+"80_str"]-df_merged[str(weight)+"_str"] ))[highlight_mask]
+                        , label="_nolegend_", color=HIGHLIGHT_COLOR,
+                        marker=marker,
+                        s=HIGHLIGHT_SIZE)
 
                     #marker='o')
         wc+=1
@@ -3808,7 +3957,7 @@ def psw___(): # plot syntehthic weights
     plt.xlim(0,130)
     #plt.ylim(0)
 
-    plt.savefig("./good_weights.svg")
+    plt.savefig("./good_weightsss.svg")
     print("./good_weights.svg")
     print(df)
     print("bru")
@@ -3821,8 +3970,19 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
     global DATA_FOLDER
     global RUN_DATA_FOLDER
     RESULT_FOLDER="maps"
-    print("RUNNING SIMPLE_WEIGHT")
+    print("RUNNING SIMPLE_WEIGHT", OVERRIDE_DATASET)
+
+    rejectuss = lambda data,r :  all( [ a not in data[r]['0']['line'] for a in [ 
+                             #'gapbs/bc' 
+                              "synt"
+                             #'cg.D' 
+
+                                                                                                # 'syn'
+                                                                                                 ]])#'sp.B' ]] ) # sroms', 'pr', 'lbm','cact',  'bc']])
+    rejectuss = lambda data,r :  all([a not in data[r]['0']['line'] for a in ['bc', 'mg', 'cg']])
+                             
     if OLD_V4:
+
         RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/v4/results_gem5"
         #RUN_DATA_FOLDER="/mnt/nas/inesc/ist196723/osdi26/results_gem5"
         run_meta=f"{RUN_DATA_FOLDER}/gem5_pids.txt"
@@ -3868,7 +4028,7 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
         print("------------------")
         # def load_multiple(data, r_list)
         keys_used = ['address', 'stallCyclesMLPLoad', 'totalTime', 'stallTime', 'average_mlp']
-        SKIP_START=000 # time to let the cache load     16Kb/8bytes = 2000 
+        SKIP_START=2000000 # time to let the cache load     160000Kb/8bytes = 2000     2,048,000 
         if not ignore_inst:
             for k in keys_used:
                 print(len(i[k][SKIP_START:]),k, "lol")
@@ -3876,6 +4036,23 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
         
         agg_keys = ['count', 'address', 'accessBracket', 'stallCyclesMLPLoad',  'totalTime', 'stallTime', 'lastStallTime']
         agg = load_aggregate_fields(data, r)
+
+        a=False;b=False
+        try:
+            agg['totalTime']
+        except Exception as e :
+            print("DOES NOT HAVE AGG",e)
+            a=True
+        try:
+            load_inst_fields(data, r )['address']
+        except Exception as e :
+            print("DOES NOT HAVE INST", e)
+            b=True
+        print("----")
+        if( (a or b) and  not (a and b)):
+            print("Salvation was possible")
+            exit(0)
+            
         #agg = load_aggregate_fields(data, r, '80')
         for k in agg_keys:
             agg[k] = agg[k]
@@ -3979,6 +4156,7 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
             exit(0)
 
         print("Unique addresses:", len(uniq_add))
+        #return
 
 
 
@@ -4024,7 +4202,7 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
                     llc_misses = (aggi['address'] == addr) & (aggi['accessBracket'] > bracket)
                     n_llc_misses = np.sum(aggi['count'][llc_misses])
                     n_llc_misses = n_llc_misses if n_llc_misses != 0 else 1
-                    n_hidden = np.sum(aggi['count'][llc_misses])
+                    n_hidden = np.sum(aggi['count'][hidden_cost])
                     n_hidden = n_hidden if n_hidden != 0 else 1
                     return (np.sum(aggi['stallCyclesMLPLoad'][hidden_cost])/n_llc_misses) + np.sum(aggi['stallCyclesMLPLoad'][llc_misses]/n_llc_misses)
                 def inst_cost(bracket, fun):
@@ -4042,7 +4220,7 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
 
                 aggCost =       np.sum((aggi['stallCyclesMLPLoad'][agg_sel]))/np.sum(aggi['count'][agg_sel])
                 aggCost = np.where(aggCost == 0, 0, aggCost)
-                aggStoreCost = np.sum((aggi['lastStallTime'][agg_sel]))/np.sum(aggi['count'])
+                aggStoreCost = np.sum((aggi['lastStallTime'][agg_sel]))/np.sum(aggi['count'][agg_sel])
 
                 aggStoreCost = np.where(aggStoreCost == 0, 0, aggStoreCost)
                 aggStoreCost = np.where(aggStoreCost > 700, 100, aggStoreCost)
@@ -4234,12 +4412,7 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
     #return iterate_over_benches(data, simp, reject= lambda x,y: False)
 
     return iterate_over_benches(data, simp ,
-                         reject= lambda data,r :  all( [ a not in data[r]['0']['line'] for a in [ 
-                             'gapbs/bc' 
-                              #"synt"
-                             #'cg.D' 
-                                                                                                # 'syn'
-                                                                                                 ]])#'sp.B' ]] ) # sroms', 'pr', 'lbm','cact',  'bc']])
+                         reject=rejectuss
                          )  # 'bwaves'
     # 'bwaves' not in data[r]['0']['line'] and
 
@@ -4250,8 +4423,9 @@ def WARMUP_TIME():
     time = []
     def warm(data, r):
         global text
-        SKIP_START = 2000
+        SAMPLES_TO_SKIP = 16777216 # 2000000
         sel = load_inst_fields(data, r )['totalTime'] > 70
+        SKIP_START = np.cumsum(sel) > SAMPLES_TO_SKIP
         data[r]['0']['time_to_warm'] = load_inst_fields(data, r )['start_cycle'][sel][SKIP_START] - load_inst_fields(data, r )['start_cycle'][sel][0]
         bname = data[r]['0']['bench'].split("/")[-1]
         benchset_ = data[r]['0']['benchset']
@@ -6586,6 +6760,7 @@ def load_bench_data():
     global DATASET_S
     global OVERRIDE_PID_ONLY
     global OVERRIDE_RUN_FOLDER
+    global DATASET
     all_data = {}
     all_lines = []
     if OLD_V4:
@@ -8371,7 +8546,8 @@ def mode_cores():
 POINT_VARIABLES = {}
 
 def robust_regress(k, all_together, REGRESS_MODE=SLOWP):
-                #def r_errors(k, REGRESS_MODE=SLOWP):
+                    global modi
+                    #def r_errors(k, REGRESS_MODE=SLOWP):
                     #x_key = "Absolute increase in cycles"
                     r = all_together[k]
                     #if k.endswith("Instruction Stall Cycles") or k.endswith("Instruction Stall cycles"):
@@ -8414,26 +8590,36 @@ def robust_regress(k, all_together, REGRESS_MODE=SLOWP):
 
 
 
+                    from scipy import stats
 
+
+                    modi="SPEARSTO"
                     
 
                     SCALE=1
                     try:
                         regress, residuals, rank, singular_values, rcond  = np.polyfit(new_y*SCALE, new_x, 1, full=True)
-                        correlation, pvalue = np.corrcoef(new_y*SCALE, new_x)
+                        correlation, pvalue = np.corrcoef(new_y*SCALE, new_x) # bad unpacking.. but who cares! 
+                        spearman_r, spearman_p = stats.spearmanr(new_y * SCALE, new_x)
+                        spearman_r, spearman_p = stats.spearmanr(new_y, all_together['LLC count'])
                     except Exception as e:
                         print(e)
                         raise Exception("Blackkk")
                     # calculate results from poly
                     ru = np.array((new_y*SCALE))* regress[0]  + regress[1]
+
                     #ru = np.clip(ru, -0.30,300)
                     BY_MEAN = len(new_x)
                     BY_MEAN = 1
                     ru = np.abs( (ru - new_x)/BY_MEAN) # **2 <-- not squared.. 
-                    if correlation[0] > 1:
+                    if correlation[0] > 1.01:
                         print("WHY?=")
-                        exit(0)
-                    out1,out2,out3 = new_y*SCALE,correlation[1], ru
+                        # exit(0)
+                    if "SPEARSTO" in modi:
+                        out1,out2,out3 = new_y*SCALE, spearman_r,ru #spearman_r, ru# correlation[1], ru correlation[1],
+                    else:
+                        out1,out2,out3 = new_y*SCALE, correlation[1]*correlation[1],ru #spearman_r, ru# correlation[1], ru correlation[1],
+                    
 
                     SSE = np.sum( (ru - new_x)**2 )
                     #SSE = residuals[0]
@@ -8461,7 +8647,7 @@ def find_outlier():
     OTHER_X_KEYS = ['Slow down (%)'    ]
     # [           '∆ Active cycles']
     
-# get_last_idx_agg
+# get_last_idx_agg/deltau
 def moment_metric():
     global NORM
     global BY_MOMENT
@@ -8565,7 +8751,7 @@ def mmoments():
     OTHER_X_KEYS= ['Average LLC MLP', 'Average MLP', SLOWP]
     OTHER_X_KEYS= [ SLOWP]
     BY_MOMENT = False
-    SHOULD_PLOT_KEY = lambda x : "ransac" in x # True # all(v in x for v in ["MLP", "Average"])
+    SHOULD_PLOT_KEY = lambda x : True #"ransac" in x # True # all(v in x for v in ["MLP", "Average"])
         #all(v in x for v in ["LLC change", "Average"])
                                      #['non_memory','stalledCyclesWithMemRequests'])
                                      #['LLC','change'])
@@ -8684,8 +8870,11 @@ def freq_stall():
     plt.show()
     
 
-def metric_eval():
+total_dps = 0 
+def metric_eval(ONLY_PBENCH=False):
+
     global total_sim_time
+    global total_dps
     global NORM
     global BY_MOMENT
     per_bench = []
@@ -8709,6 +8898,7 @@ def metric_eval():
     mode = "PERCENT_SQUASH"
     def valo(data, r):
         global total_sim_time
+        global total_dps
         print(data[r]['0']['line'])
         if is_miss_aligned(data,r):
 
@@ -8773,6 +8963,7 @@ def metric_eval():
 
 
         last_idx = get_last_idx_of_smallest_vector(glob_80['currentCycle'],glob_0['currentCycle']) 
+        total_dps +=  last_idx
         def get_last_idx_agg(_last_idx) :
             agg80 = load_aggregate_fields(data, r, "80")
             agg0 = load_aggregate_fields(data, r)
@@ -8963,6 +9154,11 @@ def metric_eval():
 
         globy['Core Load bound stalls'] = get("stalledCyclesWithMemRequests") /norm
         globy['Core Load and Store bound stalls'] = (get("stalledCyclesWithMemRequests") + get('lastStallTime'))/norm
+        globy['ld'] = get("stalledCyclesWithMemRequests") 
+        globy['st'] = get('lastStallTime')
+        globy['all'] = get('stalledCycles')
+        globy['3ld'] = get('L3cyclesWithMemrequests')
+
         #complete()
         #return
         number_of_demand_reads_0 = get('commitedLoads', False) #aggregate_op(glob_0['commitedLoads'][:last_idx])
@@ -9833,6 +10029,7 @@ def metric_eval():
     if not should_load_cached():
 
         iterate_over_benches(data, valo)
+        print("Total datapoints", total_dps)
         print("Total sim time", total_sim_time, total_sim_time/3e9)
         #exit(0)
         #return
@@ -10018,7 +10215,7 @@ def metric_eval():
 
                     plt.xticks(rotation=45, ha='right')
                     plt.tight_layout()
-                    plt.savefig(f'./_finos/_BARS/A1__ - {NORM} globos de ouro' + k.replace("/", "D")   + '.png')
+                    plt.savefig(f'./_finos/_BARS/A1__ - {NORM} globos de ouro' + k.replace("/", "D")   + '.svg')
                     print("SAVED bars")
 
                     plt.close()
@@ -10162,7 +10359,7 @@ np.array(all_together['commitedL3Misses']), all_together
                     plt.legend(handles=legend_patches, loc='upper left')
 
                     file = (
-                        f'./_finos/fii/{folder}/{sf}_ACCESS_DIST_' + unit + DATASET_S +    ".svg"
+                        f'./_finos/fii/{folder}/{sf}_ACCESS_DIST_' + unit + DATASET_S +    ".pdf"
                     )
                     print("SAVED FIG TO ", file)
                     print("Saved FIG TO ", file)
@@ -10388,8 +10585,8 @@ np.array(all_together['commitedL3Misses']), all_together
                     plt.title("Cumulative absolute prediction error over slow down")
                     plt.ylabel("Cumulative error")
                     plt.xlabel("Slow down")
-                    plt.savefig("./_finos/fii/__LLC_DIFF_3ALLCLIPED" + "_" + DATASET_S + "__global_slowdown_cdf.png")
-                    print("Saved fig",("./_finos/fii/__LLC_DIFF_2ALLCLIPED" + "_" + DATASET_S + "__global_slowdown_cdf.png"))
+                    plt.savefig("./_finos/fii/__LLC_DIFF_3ALLCLIPED" + "_" + DATASET_S + "__global_slowdown_cdf.svg")
+                    print("Saved fig",("./_finos/fii/__LLC_DIFF_2ALLCLIPED" + "_" + DATASET_S + "__global_slowdown_cdf.svg"))
                     plt.close()
                     #exit(0)
 
@@ -10431,7 +10628,7 @@ np.array(all_together['commitedL3Misses']), all_together
                     plt.title("Cumulative absolute prediction error over slow down")
                     plt.ylabel("Cumulative error")
                     plt.xlabel("Slow down")
-                    plt.savefig("./_finos/fii/__LLC_DIFF_2ALLCLIPED" + "_" + DATASET_S + "__global_slowdown_cdf.png")
+                    plt.savefig("./_finos/fii/__LLC_DIFF_2ALLCLIPED" + "_" + DATASET_S + "__global_slowdown_cdf.svg")
                     print("Saved fig",("./_finos/fii/__LLC_DIFF_2ALLCLIPED" + "_" + DATASET_S + "__global_slowdown_cdf.png"))
                     plt.close()
                     #exit(0)
@@ -10458,7 +10655,7 @@ np.array(all_together['commitedL3Misses']), all_together
                     #'title': n + " - " + k, 'folder': f"PER_BENCH/{n}"
                     #save_fig(
                     file = (
-                        f'./_finos/fii/{folder}/{sf}_{"P" if PROPORTION_ERROR else "A"}_error_over_slow' + e +str(s) + DATASET_S +    ".png"
+                        f'./_finos/fii/{folder}/{sf}_{"P" if PROPORTION_ERROR else "A"}_error_over_slow' + e +str(s) + DATASET_S +    ".pdf"
                     )
                     print("SAVED FIG TO ", file)
                     plt.savefig(file)
@@ -10673,7 +10870,7 @@ np.array(all_together['commitedL3Misses']), all_together
                     winsorize(
                                 1/np.array(y)[ind]*factor,
                             limits=[0, 0.1])
-                                , s=size, alpha=alfa) # , c=final_colors[ind]) 
+                                , s=size, alpha=alfa, rasterized=True) # , c=final_colors[ind]) 
                 else:
 
                     
@@ -11030,6 +11227,10 @@ np.array(all_together['commitedL3Misses']), all_together
     metric= []
     sane_cor =[]
     benchnrcor =[]
+    ld_st_ratio = []
+    how_much_of_all = []
+    how_much_over = []
+    spearman_llc_stall = []
     def per_bench_f():
         for i,b in enumerate(per_bench):
             p = per_bench[i]
@@ -11039,37 +11240,66 @@ np.array(all_together['commitedL3Misses']), all_together
             #continue
                     
 
-            for k in list(p.keys()):
+            key_map = {"Instruction Soar": "SOAR", "LLC count": "LLC miss count", "∆ Instruction Stall cycles/MLP": "∆ Stall cycles/MLP", "Instruction Stall cycles/MLP": "Stall Cycles/MLP", "Instruction Stall cycles": "Stall Cycles"}
+
+            """
+            try:
+                k = 'sp'
+                if k not in corres:
+                    corres[k] = []
+                s_llc = p['LLC count']
+                s_stall = p['Instruction Stall cycles/MLP']
+                s_corr, _ = stats.spearmanr(s_llc, s_stall)
+                if np.isnan(s_corr): s_corr = 0
+                corres[k].append(s_corr)
+                metric.append(k)
+            except:
+                corres[k].append(0)
+                metric.append(k)
+                s_corr = 0
+            """
+            for k in key_map.keys():
                 def correlate_llc_count_slowdown_per_bench(k):
-                    #return
+                    print(k, k in p)
+                    if k not in p:
+                        return
                     if BY_MOMENT:
-                        if k not in ["LLC count", '∆ Instruction Stall cycles/MLP','Instruction Stall cycles/MLP', 'Instruction Stall cycles'
-                                     "∆ Access Time", 'Instruction Soar', 'Soar', 
-                                     'Soar slowdown1', 'Soar slowdown2', 'Soar slowdown3'
-                                     ]:
-                        #if not (  ("Instruction" and ( "Soar" in k or "MLP" in k ))  or "LLC Count" in k or "Access Time" in k):
-                            return
+                        spearman_llc_stall.append(0)
                         if k not in corres:
                             corres[k] = []
                             corres_agg[k] = []
                         try:    
-                            _ = robust_regress(k,p, p[SLOWP])[1]
+                            how_many_more = np.sum(p['st'])/np.sum(p['ld'])
+                            how_much_overr = (np.sum(p['st']))/(np.sum(p['all'])-np.sum(p['ld']))
+                            how_much_over.append(how_much_overr)
+
+                            how_much_of_al = 100*np.sum(p['st'])/np.sum(p['3ld']) # all
+
+                            ld_st_ratio.append(how_many_more)
+                            how_much_of_all.append(how_much_of_al)
+
+
+                            _ = robust_regress(k,p)[1]
                             corres[k].append(_)
                             sane_cor.append(_ )
-                        except:    
+                        except Exception as e: 
+                            print(e)   
+                            import traceback
+                            print(traceback.print_exc())
                             sane_cor.append(0)
                             corres[k].append(0)
                         corres_agg[k].append(np.sum(p[k])) # sum of the metric
-                        metric.append(k)
+                        metric.append(key_map[k])
                         agg_slowp.append(np.sum(p["Absolute increase in cycles"])/np.sum(p['Cycles']))
                         benchcor.append(n)
                         benchcor_id.append(i)
                         benchnrcor.append(benchnrrr[i])
+                print(BY_MOMENT, "BY MOMENTOOOO")        
                 correlate_llc_count_slowdown_per_bench(k)
                 #continue
                 
                 for x in x_keys: #[ 'Slow down (%)', 'Absolute increase in cycles', 'Core Stall Cycles']:
-                    #continue
+                    continue
                 #if should_skip_key(k):
                 #continue
                 #for x in x_keys: #[ 'Slow down (%)', 'Absolute increase in cycles', 'Core Stall Cycles']:
@@ -11078,6 +11308,7 @@ np.array(all_together['commitedL3Misses']), all_together
                     f = n + "-" + str(benchnrrr[i])
                     os.makedirs(f"/home/ist196723/nas/osdi26/_finos/fii/PER_BENCH/{f}/", exist_ok=True)
                     print("Doing key", k , "and x key",x ) # , len(p[k]), len(p[x]))
+                    
 
 
                     plot_keypair(k, p, BY_MOMENT, x, 
@@ -11096,10 +11327,23 @@ np.array(all_together['commitedL3Misses']), all_together
             import pandas as pd
             import seaborn as sns
             import matplotlib.pyplot as plt
-            plt.figure(figsize=(10,15))
+            
+            plt.rcParams.update({
+                'font.size': 14,          # Base text
+                'axes.titlesize': 18,     # Axes titles
+                'axes.labelsize': 18,     # X/Y labels
+                'xtick.labelsize': 17,    # X tick labels
+                'ytick.labelsize': 17,    # Y tick labels
+                'legend.fontsize': 12,    # Legend
+                'figure.titlesize': 80    # Figure title
+            })
+            
+            #plt.figure(figsize=(14, 6))
+            #plt.figure(figsize=( 5.91,	3.65)) 
+            plt.figure(figsize=(14, 4.75))
             corres_agg_cor = {}
             rows = []
-            corrLabel =  "Correlation w/Slowdown"
+            corrLabel =  "Metric correlation w/Slowdown within each benchmark"
             #for k in corres:
             #    for i in range(len(corres[k])):
             #        rows.append({"Metric": str(k), corrLabel: corres[k][i], 'Bench' :get_color_bin( benchcor[i] ) , 'bid': benchcor_id[i] })
@@ -11110,30 +11354,70 @@ np.array(all_together['commitedL3Misses']), all_together
                 for i in range(len(corres_agg[k])):
                     rows.append({"Metric": str(k), "Correlation w/Slowdown": corres_agg[k][i], 'Bench' : i })
             """
-            #df = pd.DataFrame({corrLabel: sanerows).fillna(0)
             df = pd.DataFrame({corrLabel: sane_cor, 'Metric' : metric, 'bid' : benchcor_id}).fillna(0)
-            df['Metric'] = pd.Categorical(df['Metric'])
+            # print full df
+            print(df)
+            #df = df[df['Metric'] != 'SOAR']
+            X = 2  # Expected baseline DATASET
+            csv_path = f"./_finos/fii/correlations_DATASET_{X}.csv"
+            import os
+            
+            if DATASET == X:
+                df.to_csv(csv_path, index=False)
+            else:                
+                df = df[df['Metric'] != 'SOAR']
+                if modi == "SPEARSTO":
+                    df = df[df['Metric'] != 'LLC miss count']
+                if os.path.exists(csv_path):
+                    df_saved = pd.read_csv(csv_path)
+                    soar_baseline = df_saved[df_saved['Metric'] == 'SOAR'].copy()
+                    soar_baseline['Metric'] = 'SOAR'
+                    
+                    unique_bids = pd.DataFrame({'bid': df['bid'].unique()})
+                    soar_joined = pd.merge(unique_bids, soar_baseline, on='bid', how='left')
+                    
+                    missing_bids = soar_joined[soar_joined[corrLabel].isna()]['bid'].tolist()
+                    if missing_bids:
+                        missing_names = [benchname[int(b)] if str(b).isdigit() else b for b in missing_bids]
+                        print("Benchmarks missing SOAR baseline:", missing_names)
+                        
+                    soar_joined[corrLabel] = soar_joined[corrLabel].fillna(-10)
+                    soar_joined['Metric'] = 'SOAR'
+                    
+                    df = pd.concat([df, soar_joined], ignore_index=True)
+            desired_order = ["SOAR", "LLC miss count", "∆ Stall cycles/MLP", "Stall Cycles/MLP", "Stall Cycles"]
+            df['Metric'] = pd.Categorical(df['Metric'], categories=desired_order, ordered=True)
             df['bid'] = pd.Categorical(df['bid'])
-            print(df['Metric'], "mmmmmmmmm")
-            #df = df.groupby('bid')[[  f for  f in df.columns if f != "bid" and f != "Metric" ]]
+            
+            # Sort so that lines are drawn in the strict desired order
+            df = df.sort_values(by=['bid', 'Metric']).dropna(subset=['Metric'])
+
             xk = 'bid'
-            for b in np.unique(df[xk]):
-                s = df[xk] == b
-                s = np.array(benchcor_id) == b
-                #print(b, len(np.array(df[corrLabel][s])),len(np.array(df['Metric'][s])) )
-                # convert NANs to -2
-                #plt.plot(np.array(df['Metric'][s]), np.array(df[corrLabel][s]), marker='o', markersize=8)
-                plt.plot(np.array(metric)[s], np.array(sane_cor)[s], marker='o', markersize=8, color=get_color_bin(benchname[b]))
-                for i in range(len(np.array(metric)[s])):
-                    print("!!!" if np.array(sane_cor)[s][i] < 0 else "", np.array(metric)[s][i], np.array(sane_cor)[s][i], benchname[b], np.array(benchnrcor)[s])
-                #break
+            for b in df[xk].dropna().unique():
+                df_b = df[df[xk] == b]
+                df_b = df_b[df_b[corrLabel] != -10]
+                if df_b.empty: continue
+                b_idx = int(b) if str(b).isdigit() else b
+                try: color = get_color_bin(benchname[b_idx])
+                except Exception: color = get_color_bin(b)
+                plt.plot(df_b[corrLabel].values, df_b['Metric'].values, marker='o', markersize=8, color=color)
+                
+                for _, row in df_b.iterrows():
+                    print("!!!" if row[corrLabel] < 0 else "", row['Metric'], row[corrLabel], benchname[b_idx], "RATIO w/loads", ld_st_ratio[b_idx], "RATIO OF ALL", how_much_of_all[b_idx], "RATIO OVER", how_much_over[b_idx], "Spearman LLC/Stall", spearman_llc_stall[b_idx], "bench line", benchnrrr[b_idx], b_idx)
+                    #  44 ... <---
 
 
             # 45 deg ticks
-            plt.xticks(rotation=45, ha='right')
-            plt.ylabel('Correlation')
-            plt.xlabel('Metric')
-            plt.title('Correlation w/Slowdown')
+            # plt.xticks(rotation=45, ha='right')
+            plt.xlabel('Correlation')
+            plt.ylabel('Metric')
+
+            corrLabel =  "Metric correlation w/Slowdown within each benchmark"
+            plt.title(corrLabel)
+            if modi == "SPEARSTO":
+                plt.title("Rank correlation of metrics w/LLC miss count")
+
+
             # beeswarm (swarm plot): k is category, value is numeric point
             """
             df.plot(
@@ -11165,9 +11449,26 @@ np.array(all_together['commitedL3Misses']), all_together
             #plt.xlabel("Slowdown (%)")
             #plt.ylabel("Correlation")
             plt.legend() # Global corr (all together) versus  individual... <-- there is higher correlation when all are considered, given that within each bench everything is the same pretty much
-            f = "./__correlation_NEWwithin_outside.png"
-            plt.savefig(f)
+            f = "./__correlation_NEWwithin_outside.pdf"
+            plt.tight_layout()
+            plt.savefig(f, bbox_inches='tight')
             print("Saved fig to ",f)
+            
+            # Standalone Legend Generation
+            import matplotlib.patches as mpatches
+            handles = [
+                mpatches.Patch(color='blue', label='CPU2017'),
+                mpatches.Patch(color='orange', label='GAPBS'),
+                mpatches.Patch(color='purple', label='NPB'),
+                mpatches.Patch(color='grey', label='Others')
+            ]
+            fig_leg = plt.figure(figsize=(6, 1))
+            ax_leg = fig_leg.add_subplot(111)
+            ax_leg.axis('off')
+            ax_leg.legend(handles=handles, loc='center', ncol=4, frameon=False, fontsize=14)
+            fig_leg.savefig('./__correlation_legend_standalone.pdf', bbox_inches='tight')
+            plt.close(fig_leg)
+            print("Saved standalone legend to ./__correlation_legend_standalone.pdf")
         plot_correlation_per_bench()
     #exit(0)
     # 186233897
@@ -11182,17 +11483,20 @@ np.array(all_together['commitedL3Misses']), all_together
             for ykey in [k for k in all_together.keys() if '/' in k and 'Slow Cycles' in k  ]: # ['Mem Stall Cycles/Slow Cycles',  "Fast LLC Stall Cycles/Slow Cycles"]: # this is K
                 plot_keypair(ykey , all_together, BY_MOMENT, xkey, KEY_PLOT=True)
         exit(0)
-    #plot_aol()
-    global_plots()
-    #exit(0)
+    if ONLY_PBENCH:
+        per_bench_f()
+        exit(0)
+    else:
+        #plot_aol()
+        global_plots()
+        #exit(0)
 
-    final_soar = [ 'SOAR', 'SOAR Abs']
-    plot_keypair(final_soar[0] , all_together, BY_MOMENT, SLOWP, KEY_PLOT=True)
-    plot_keypair(final_soar[1] , all_together, BY_MOMENT, ABS, KEY_PLOT=True)
+        final_soar = [ 'SOAR', 'SOAR Abs']
+        plot_keypair(final_soar[0] , all_together, BY_MOMENT, SLOWP, KEY_PLOT=True)
+        plot_keypair(final_soar[1] , all_together, BY_MOMENT, ABS, KEY_PLOT=True)
 
-    plot_keypair(list(all_together.keys())[0], all_together, BY_MOMENT, SLOWP, KEY_PLOT=False)
+        plot_keypair(list(all_together.keys())[0], all_together, BY_MOMENT, SLOWP, KEY_PLOT=False)
 
-    #per_bench_f()
     #exit(17659693990)
 
 
@@ -11200,6 +11504,16 @@ np.array(all_together['commitedL3Misses']), all_together
     #return
 
     
+def pbench():
+    global NORM
+    global BY_MOMENT
+    global INTENSITY_metric
+    print("NORM", NORM)
+    #exit(0)
+    NORM='user'
+    BY_MOMENT = True
+    metric_eval(ONLY_PBENCH=True)
+        
     
 
 FIELDS_OF_INTEREST = ['currentCycle', 'stalledCycles', 'cyclesWithMemrequests', 'commitedLoads', 'commitedL3Misses', 'commitedLoads',  'L3stalledCycles', 'L3stallCyclesMLPLoad']
