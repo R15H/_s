@@ -1271,6 +1271,8 @@ def cdf_inst():
                     for line in lines:
                         v = line.split(" ")
                         d['address'].append(v[0])
+                        if int(v[1]) == 0:
+                            continue
                         d['Access time'].append(int(v[1]))
                         d['Stall Cycles'].append(int(v[2]))
                         d['Stall Cycles/MLP'].append(int(v[4]))
@@ -1286,21 +1288,28 @@ def cdf_inst():
             plt.title("Stall Cycles/MLP vs Frequency")
             plt.xlabel("Stall Cycles/MLP")
             plt.ylabel("Frequency")
-            f = (f"{FIGS_FOLDER}/{RESULT_FOLDER}/{file}_stallsmlp_freqNEW.png")
+            f = (f"{FIGS_FOLDER}/{RESULT_FOLDER}/{file}_stallsmlp_freqNEW.pdf")
             print("saved",  f)
             plt.savefig(f)
             plt.close()
 
             
-
-            plt.title("CDF of instruction metrics for " + file.split("-")[1])
+            f = ""
+            if "bc" in file.split("-")[1]:
+                f = "GAPBS - Betweeness Centrality"
+            elif "cg.D" in file:
+                f = "PARSEC - cg.D"
+            elif "mg.C" in file:
+                f = "PARSEC - mg.C"
+                
+            plt.title("CDF of instruction metrics for " +f)
             plt.xlabel("Metric")
             for i in ['Stall Cycles', 'Access time','Stall Cycles/MLP']:
                 sorted_data, cdf = get_cdf_array(d[i])
                 plt.plot(sorted_data, cdf, label=i)
             plt.ylabel("CDF")
             plt.legend()
-            f = (f"{FIGS_FOLDER}/{RESULT_FOLDER}/{file}{MODE}NEW.png")
+            f = (f"{FIGS_FOLDER}/{RESULT_FOLDER}/{file}{MODE}NEW.pdf")
             print("saved",  f)
             plt.savefig(f)
             plt.close()
@@ -1316,7 +1325,76 @@ def cdf_inst():
         plt.savefig(f"{FIGS_FOLDER}/{RESULT_FOLDER}/{file}.png")
         plt.close()
         """
-def correspond(): 
+def scatter_mlpweighted_vs_last():
+    import glob
+    import re
+    import matplotlib.cm as cm
+
+    folder = "/mnt/nas/inesc/ist196723/osdi26/final_data/_mu_inst/"
+
+    # strip the trailing {writes}-{len} suffix to get one key per binary
+    bench_files = {}
+    for fpath in sorted(glob.glob(folder + "*")):
+        if "cg" not in fpath:
+            #continue
+            pass
+        fname = os.path.basename(fpath)
+        if not re.search(r'\d+-\d+$', fname):
+            continue
+        key = re.sub(r'\d+-\d+$', '', fname)
+        if key not in bench_files:
+            bench_files[key] = fpath
+
+    colors = cm.tab20.colors
+    plt.figure(figsize=(8, 6))
+    for idx, (key, fpath) in enumerate(sorted(bench_files.items())):
+        mlpweighted_vals = []
+        freq = []
+        last_col_vals = []
+        try:
+            with open(fpath, 'r') as f:
+                lines = f.readlines()[1:]  # skip header
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                v = line.split()
+                if len(v) < 17:
+                    continue
+                try:
+                    x = float(v[-1])
+                    y = float(v[4])
+                    f = float(v[8])
+                    if x > 0 and y > 0:
+                        last_col_vals.append(x)
+                        freq.append(f)
+                        mlpweighted_vals.append(y)
+                except ValueError:
+                    continue
+        except Exception as e:
+            print(f"Failed to read {fpath}: {e}")
+            continue
+        #mlpweighted_vals = freq
+        _ = np.array(last_col_vals)
+        last_col_vals = _/np.sum(_)
+        label = key.split("-")[-1] or key
+        color = colors[idx % len(colors)]
+        plt.scatter(last_col_vals, mlpweighted_vals,
+                    s=4, alpha=0.5, color=color, label=label)
+
+    #plt.xscale('log')
+    #plt.yscale('log')
+    plt.xlabel("Total access cost")
+    plt.ylabel("Individual access cost")
+    plt.title("Instruction access costs global vs individual")
+    plt.legend(markerscale=3, fontsize=8, loc='upper left')
+    out = f"{FIGS_FOLDER}/gen/mlpweighted_vs_last.png"
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    plt.savefig(out, dpi=150)
+    plt.close()
+    print("Saved", out)
+
+def correspond():
     import glob
     files = glob.glob("/home/ist196723/nas/tools/SoarAlto/run/bc-urand/rst/rst-TPP/out-th0-*")
     # sort files by date
@@ -3979,7 +4057,7 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
 
                                                                                                 # 'syn'
                                                                                                  ]])#'sp.B' ]] ) # sroms', 'pr', 'lbm','cact',  'bc']])
-    rejectuss = lambda data,r :  all([a not in data[r]['0']['line'] for a in ['bc', 'mg', 'cg']])
+    rejectuss = lambda data,r :  all([a not in data[r]['0']['line'] for a in ['cg.D' ]] ) # 'bc', 'mg.C', 'cg.D', "gapbs"]])
                              
     if OLD_V4:
 
@@ -3996,11 +4074,14 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
         RESULT_FOLDER=OVERRIDE_OUTPUT_FOLDER
     if INSTRUCTION_ONLY:
         ignore_inst = INSTRUCTION_ONLY
+    processed_binaries = set()
     def simp(data,r):
         global writes
         EIGHT_MODE=False
         this_binary = data[r]['0']['bench'].split("/")[-1]
         print(this_binary, "THI SBINARY")
+        if MULTI and this_binary in processed_binaries:
+            return
         if TARGET_BIN and TARGET_BIN not in this_binary:
             return
         benchset = data[r]['0']['benchset']
@@ -4049,10 +4130,27 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
             print("DOES NOT HAVE INST", e)
             b=True
         print("----")
-        if( (a or b) and  not (a and b)):
-            print("Salvation was possible")
-            exit(0)
-            
+        if a:
+            if b:
+                print("No agg and no inst, skipping")
+                return
+            # Has inst but no agg — fake agg with -1 sentinel values so output columns stay intact
+            print("No agg, faking with -1 sentinel values")
+            _fake_addrs = np.unique(load_inst_fields(data, r)['address'])
+            _n = len(_fake_addrs)
+            agg = {
+                'address':            _fake_addrs,
+                'count':              np.ones(_n, dtype=np.int64),
+                'accessBracket':      np.full(_n, 5, dtype=np.int64),
+                'stallCyclesMLPLoad': np.full(_n, -1, dtype=np.int64),
+                'totalTime':          np.full(_n, -1, dtype=np.int64),
+                'stallTime':          np.full(_n, -1, dtype=np.int64),
+                'lastStallTime':      np.full(_n, -1, dtype=np.int64),
+            }
+        elif b and not ignore_inst:
+            print("No inst data for this run, skipping")
+            return
+
         #agg = load_aggregate_fields(data, r, '80')
         for k in agg_keys:
             agg[k] = agg[k]
@@ -4085,16 +4183,15 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
 
 
                     try:
-                        for k in keys_used: 
-                            if(len(load_inst_fields(data, r )['totalTime']) != len(load_inst_fields(data, r )['address']) ):
-                                            print("big mistake!!")
-                                            raise Exception("Bad binary...")
-                                            return
-                            load_inst_fields(data, ru )[k][SKIP_START:] # test that it works
+                        if not ignore_inst:
+                            for k in keys_used:
+                                if(len(load_inst_fields(data, ru)['totalTime']) != len(load_inst_fields(data, ru)['address'])):
+                                    print("big mistake!!")
+                                    raise Exception("Bad binary...")
+                                load_inst_fields(data, ru)[k][SKIP_START:] # test that it works
                         for k in agg_keys:
-                            load_aggregate_fields(data, r)[k]
-    
-                        
+                            load_aggregate_fields(data, ru)[k]
+
                     except:
                         continue
 
@@ -4176,6 +4273,8 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
         import math 
         print( "Shared lib importance", np.sum(agg['count'][agg['address'] > 154139636 ]) / np.sum(agg['count']))
         nr_stores = 0; skipped = 0; actually_added = 0
+        if MULTI:
+            processed_binaries.add(this_binary)
         def process_inst(addr):
             sanity = []
             def _proccess_inst(addr, aggi):
@@ -4196,7 +4295,8 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
                 agg_sel = aggi['address'] == addr
                 isStore = np.sum(aggi['totalTime'][agg_sel]) == 0
 
-                if isStore:
+                if isStore: ###############
+                    return
                     pass
                     #nr_stores += 1
 
@@ -4313,7 +4413,7 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
                 str(toi(average_inst_cost_160)) +  " " + \
                 si(aggStoreCost) + \
                 si(mlpWeightedAgg)  +  \
-                si(bmw_metric) + "\n"
+                si(bmw_metric) + si(bmw_metric*freq) + si(mlp_by_mean*freq) + "\n" # plot bmw_m
                 #actually_added += 1
                 return res
                 """
@@ -4380,6 +4480,7 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
         with open(fname, "w") as f:
                 print(fname)
                 f.write(out)
+        
         return        
         if "syn" in benchset:
             header = (str(3) + " ") * 10 
@@ -8764,7 +8865,7 @@ def MLPscati():
     global BY_HOT
     OTHER_X_KEYS= [ SLOWP]
     BY_MOMENT = True
-    SHOULD_PLOT_KEY = lambda x : "Instruction Stall" in x #"ransac" in x # True # all(v in x for v in ["MLP", "Average"])
+    SHOULD_PLOT_KEY = lambda x : "Instruction Stall" in x and ("Start" not in x or "End" not in x or 'Average' not in x) #  "ransac" in x # True # all(v in x for v in ["MLP", "Average"])
 
     #for i in [4, #1]: ]:
     NORM = "user"
@@ -8773,6 +8874,28 @@ def MLPscati():
     BY_HOT=False
     metric_eval()
     exit(0)
+
+def cori():
+    global NORM
+    global BY_MOMENT
+    global INTENSITY_metric
+    global OTHER_X_KEYS
+    global SHOULD_PLOT_KEY
+    global OVERRIDE_DATASET
+    global BY_HOT
+    OTHER_X_KEYS= [ SLOWP]
+    BY_MOMENT = True
+    SHOULD_PLOT_KEY = lambda x : ("Core Stalls Cycles" in x \
+        or "LLC change" in x\
+    or "Core Stall Cycles" in x or "strong ransac" in x \
+    ) and ("Start" not in x or "End" not in x or 'Average' not in x) #  "ransac" in x # True # all(v in x for v in ["MLP", "Average"])
+
+    #for i in [4, #1]: ]:
+    NORM = "user"
+    BY_HOT=False
+    metric_eval()
+    exit(0)
+
 
 
 def mmoments():
@@ -9090,7 +9213,7 @@ def metric_eval(ONLY_PBENCH=False):
             #pass
 
 
-        agg0 = load_aggregate_fields(data, r)
+        #agg0 = load_aggregate_fields(data, r)
         #print("LST", get('lastStallTime') )
         #print(agg0['lastStallTime'])
         #agg80 = load_aggregate_fields(data, r, '80')
@@ -9906,7 +10029,7 @@ def metric_eval(ONLY_PBENCH=False):
         globy['LLC SOAR (ransac)'] = unadjusted_slowdown * (1/(a + b/AOL))
         a=3.968082326935735 
         b=11.585229969197693
-        globy['LLC SOAR (storng ransac)'] = unadjusted_slowdown * (1/(a + b/AOL))
+        globy['LLC SOAR (strong ransac)'] = unadjusted_slowdown * (1/(a + b/AOL))
 
 
         # proper SLOW
@@ -10861,7 +10984,7 @@ np.array(all_together['commitedL3Misses']), all_together
                 __[-1] = _
                 path = "/".join(__)
                 ext = ".pdf" #".png"
-                ext = "BRUTO.svg" #".png"
+                #ext = "BRUTO.svg" #".png"
                 path += DATASET_S + ext
                 plt.savefig(path)
                 plt.close()
@@ -11010,11 +11133,11 @@ np.array(all_together['commitedL3Misses']), all_together
                         vmin, vmax = np.nanpercentile(c, [2, 98])
                         sc = plt.scatter(x,yu*factor,s=size, alpha=alfa , c=c, cmap=black_to_red, vmin=vmin, vmax=vmax, rasterized=True)
                         ax = plt.gca()
-                        cax = ax.inset_axes([0.02, 0.76, 0.03, 0.2])
-                        cbar = plt.colorbar(sc, cax=cax)
+                        cax = ax.inset_axes([0.02, 0.93, 0.3, 0.03])
+                        cbar = plt.colorbar(sc, cax=cax, orientation='horizontal')
                         cbar.solids.set_alpha(1)
-                        cbar.ax.tick_params(labelsize=20, colors='black')
-                        cbar.set_label("Average MLP", fontsize=20, color='black')
+                        cbar.ax.tick_params(labelsize=30, colors='black')
+                        cbar.set_label("Average MLP", fontsize=30, color='black')
                     else:
                         plt.scatter(x,yu*factor,s=size, alpha=alfa , c=c, rasterized=True)
                     plt.xlim(np.min(x), np.max(x))
@@ -11053,7 +11176,7 @@ np.array(all_together['commitedL3Misses']), all_together
             #plt.scatter(all_together['global_slowdown'], all_together[k], s=size, alpha=alfa , c=final_colors) 
             if BY_MOMENT or True:
                 fontSize = 35
-                plt.rcParams.update({'font.size': fontSize, 
+                plt.rcParams.update({'font.size': fontSize,
                                     'axes.labelsize': fontSize,
                                     'axes.titlesize': fontSize,
                                     'xtick.labelsize': fontSize,
@@ -11061,8 +11184,8 @@ np.array(all_together['commitedL3Misses']), all_together
                                     'legend.fontsize': fontSize,
                                     'figure.titlesize': fontSize})
 
-                plt.tick_params(axis='x', labelsize=33)
-                plt.tick_params(axis='y', labelsize=33)
+                plt.tick_params(axis='x', labelsize=30)
+                plt.tick_params(axis='y', labelsize=30)
             if '%' in x_key:
                 plt.ticklabel_format(axis='x', style='plain')
             plt_args= ( {'fontsize':fontSize} if BY_MOMENT else {})
@@ -11087,11 +11210,19 @@ np.array(all_together['commitedL3Misses']), all_together
             if "Slow_down" not in x_key:
                 x_var_descriminator = "-" + x_key
             do_scatter(x_axis, all_together[k],size=size, alfa=alfa)
+            plt.tick_params(axis='x', labelsize=fontSize)
+            plt.tick_params(axis='y', labelsize=fontSize)
+            plt.xlabel(x_key, fontsize=fontSize)
+                
+            plt.ylabel(k, fontsize=fontSize)
+            if "strong ransac" in k:
+                plt.ylabel(k.replace("(strong ransac)", ""), fontsize=fontSize)
 
             sf = EXTRA['sf']  if 'sf' in EXTRA else ''
             title = "" if not 'title' in EXTRA else EXTRA['title']
             if 'title' in EXTRA:
                 plt.title(EXTRA['title'])
+            plt.tight_layout()
             save_fig(f'./_finos/fii/{folder}{"/LLC_ONLY_" if LLC_ONLY else ""}{sf}A__{"HOT_" if BY_HOT else ""}{"ERVIEW" if ERROR_VIEW else ""}{"BY_MOMENT" if BY_MOMENT else ""} {INTENSITY_metric if INTENSITY_metric else  ""} - {NORM} globos de ouroOO_OO_OO' + k.replace("/", "D") + " " + x_key.replace("/","D") + "_" + DATASET_S + '.pdf'.replace(" ", "_"))
             print("Saved!")
             def hexa_plot():
@@ -11882,7 +12013,7 @@ def calculate_derivates(data):
                 plt.title("MLP stalls 0")
                 # os make dir gen/mlp_stalls
                 os.makedirs(f"{FIGS_FOLDER}/gen/vars/{var}", exist_ok=True)
-                plt.savefig(f"{FIGS_FOLDER}/gen/vars/{var}/_0_{bench_name}_{bench_nr}_0.png")
+                plt.savefig(f"{FIGS_FOLDER}/gen/vars/{var}/_0_{bench_name}_{bench_nr}_0.pdf")
                 plt.close()
                 
             plot_var("mlp_stalls_0", v)
