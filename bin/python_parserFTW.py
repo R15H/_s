@@ -4078,8 +4078,11 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
                 if '0' not in data[ru]:
                     continue
                 binary = data[ru]['0']['bench'].split("/")[-1]
+                if ru == r:
+                    continue
 
                 if binary == this_binary: #and data[ru]['0']['benchset'] == data[r]['0']['benchset']:
+
 
                     try:
                         for k in keys_used: 
@@ -4423,10 +4426,23 @@ def WARMUP_TIME():
     time = []
     def warm(data, r):
         global text
-        SAMPLES_TO_SKIP = 16777216 # 2000000
+        SAMPLE_RATE = 100 # CHECK W/GEM5 CODE
+        CACHE_SIZE = 16 # in Mb
+        LINE_SIZE = 64 # bytes
+        # to be sure the cache is full, we need to skip the number of samples that 
+        # fills the cache... so (16mb / 64 bytes)/Sampling rate
+        SAMPLES_TO_SKIP = int((CACHE_SIZE * 1024*1024 / LINE_SIZE) / SAMPLE_RATE)
+        print("SAMPLES_TO_SKIP--",   CACHE_SIZE, LINE_SIZE, SAMPLE_RATE, (CACHE_SIZE * 1024 / LINE_SIZE), SAMPLES_TO_SKIP)
+        #SAMPLES_TO_SKIP = 16777 # 216 # 2000000  
         sel = load_inst_fields(data, r )['totalTime'] > 70
-        SKIP_START = np.cumsum(sel) > SAMPLES_TO_SKIP
-        data[r]['0']['time_to_warm'] = load_inst_fields(data, r )['start_cycle'][sel][SKIP_START] - load_inst_fields(data, r )['start_cycle'][sel][0]
+        candidates = np.where(np.cumsum(sel) >= SAMPLES_TO_SKIP)[0]
+        if len(candidates) == 0:
+            raise ValueError(
+                f"Not enough samples matching totalTime > 70. "
+                f"Found {sel.sum()} qualifying samples, need > {SAMPLES_TO_SKIP}."
+            )
+        SKIP_START = candidates[0]
+        data[r]['0']['time_to_warm'] = load_inst_fields(data, r )['start_cycle'][SKIP_START] - load_inst_fields(data, r )['start_cycle'][0]
         bname = data[r]['0']['bench'].split("/")[-1]
         benchset_ = data[r]['0']['benchset']
         text += benchset_ + " " + bname + " " + str(data[r]['0']['time_to_warm'] * (1/3e9)) + "\n"  # at 3GHz this is the time it took to warm
@@ -8738,6 +8754,26 @@ def stori():
     BY_MOMENT = False
     metric_eval()
     exit(0)
+def MLPscati():
+    global NORM
+    global BY_MOMENT
+    global INTENSITY_metric
+    global OTHER_X_KEYS
+    global SHOULD_PLOT_KEY
+    global OVERRIDE_DATASET
+    global BY_HOT
+    OTHER_X_KEYS= [ SLOWP]
+    BY_MOMENT = True
+    SHOULD_PLOT_KEY = lambda x : "Instruction Stall" in x #"ransac" in x # True # all(v in x for v in ["MLP", "Average"])
+
+    #for i in [4, #1]: ]:
+    NORM = "user"
+    BY_HOT=True
+    metric_eval()
+    BY_HOT=False
+    metric_eval()
+    exit(0)
+
 
 def mmoments():
     global NORM
@@ -10585,8 +10621,8 @@ np.array(all_together['commitedL3Misses']), all_together
                     plt.title("Cumulative absolute prediction error over slow down")
                     plt.ylabel("Cumulative error")
                     plt.xlabel("Slow down")
-                    plt.savefig("./_finos/fii/__LLC_DIFF_3ALLCLIPED" + "_" + DATASET_S + "__global_slowdown_cdf.svg")
-                    print("Saved fig",("./_finos/fii/__LLC_DIFF_2ALLCLIPED" + "_" + DATASET_S + "__global_slowdown_cdf.svg"))
+                    plt.savefig("./_finos/fii/__LLC_DIFF_3ALLCLIPED" + "_" + DATASET_S + "__global_slowdown_cdf.pdf")
+                    print("Saved fig",("./_finos/fii/__LLC_DIFF_2ALLCLIPED" + "_" + DATASET_S + "__global_slowdown_cdf.pdf"))
                     plt.close()
                     #exit(0)
 
@@ -10750,7 +10786,7 @@ np.array(all_together['commitedL3Misses']), all_together
                     plt.title("Cumulative absolute prediction error over slow down")
                     plt.ylabel("Cumulative error")
                     plt.xlabel("Slow down")
-                    i = "./_finos/fii/_1lol__nonsq2ALLCLIPED" + k.replace("/", "D") + DATASET_S + "__global_slowdown_cdf.png"
+                    i = "./_finos/fii/_1lol__nonsq2ALLCLIPED" + k.replace("/", "D") + DATASET_S + "__global_slowdown_cdf.pdf"
                     plt.savefig(i)
                     print("Saved fig",i)
 
@@ -10824,7 +10860,8 @@ np.array(all_together['commitedL3Misses']), all_together
                 __ = path.split("/")
                 __[-1] = _
                 path = "/".join(__)
-                ext = ".svg" #".png"
+                ext = ".pdf" #".png"
+                ext = "BRUTO.svg" #".png"
                 path += DATASET_S + ext
                 plt.savefig(path)
                 plt.close()
@@ -10842,6 +10879,8 @@ np.array(all_together['commitedL3Misses']), all_together
 
                 #plt.xlim(np.min(x), np.max(x))
                 yu  = y #[:limit]
+                from scipy.stats.mstats import winsorize
+                yu = winsorize(yu, limits=[0.001, 0.001])
                 #yu  = np.full( len(y[:limit]), 1) #/median
                 c = final_colors #[:limit] 
                 if 'sf' in EXTRA:
@@ -10854,10 +10893,13 @@ np.array(all_together['commitedL3Misses']), all_together
 
                 factor = 1 if NORM != "user" else 100
                 plt.tick_params(axis='both', which='major', labelsize=14)
+                plt.rc('axes', labelsize=18)
+                plt.rc('xtick', labelsize=16)
+                plt.rc('ytick', labelsize=16)
 
 
                 ind = np.array(x) != 0
-                from scipy.stats.mstats import winsorize
+                AOL_BIG = True
                 AOL_BIG = False
                 if AOL_BIG:
                     factor = 1
@@ -10869,7 +10911,7 @@ np.array(all_together['commitedL3Misses']), all_together
                             
                     winsorize(
                                 1/np.array(y)[ind]*factor,
-                            limits=[0, 0.1])
+                            limits=[0, 0.01])
                                 , s=size, alpha=alfa, rasterized=True) # , c=final_colors[ind]) 
                 else:
 
@@ -10959,12 +11001,22 @@ np.array(all_together['commitedL3Misses']), all_together
                     """
 
 
+                    factor = 100
 
                     if BY_HOT:
-                        c=all_together['average_mlp']
-                        plt.scatter(x,yu*factor,s=size, alpha=alfa , c=c, cmap="hot")
+                        import matplotlib.colors as mcolors
+                        black_to_red = mcolors.LinearSegmentedColormap.from_list('black_to_red', plt.cm.hot(np.linspace(0, 0.35, 256)))
+                        c = np.array(all_together['average_mlp'], dtype=float)
+                        vmin, vmax = np.nanpercentile(c, [2, 98])
+                        sc = plt.scatter(x,yu*factor,s=size, alpha=alfa , c=c, cmap=black_to_red, vmin=vmin, vmax=vmax, rasterized=True)
+                        ax = plt.gca()
+                        cax = ax.inset_axes([0.02, 0.76, 0.03, 0.2])
+                        cbar = plt.colorbar(sc, cax=cax)
+                        cbar.solids.set_alpha(1)
+                        cbar.ax.tick_params(labelsize=20, colors='black')
+                        cbar.set_label("Average MLP", fontsize=20, color='black')
                     else:
-                        plt.scatter(x,yu*factor,s=size, alpha=alfa , c=c)
+                        plt.scatter(x,yu*factor,s=size, alpha=alfa , c=c, rasterized=True)
                     plt.xlim(np.min(x), np.max(x))
                 
                 #plt.xlim(10, 100)
@@ -11009,12 +11061,13 @@ np.array(all_together['commitedL3Misses']), all_together
                                     'legend.fontsize': fontSize,
                                     'figure.titlesize': fontSize})
 
-                plt.tick_params(axis='x', labelsize=30)
-                plt.tick_params(axis='y', labelsize=30)
+                plt.tick_params(axis='x', labelsize=33)
+                plt.tick_params(axis='y', labelsize=33)
             if '%' in x_key:
                 plt.ticklabel_format(axis='x', style='plain')
             plt_args= ( {'fontsize':fontSize} if BY_MOMENT else {})
-            do_legend()
+            if not BY_HOT:
+                do_legend()
             plt.xlabel(x_key, **plt_args)
             plt.ylabel(k, **plt_args)
             kind = ""
@@ -11039,7 +11092,7 @@ np.array(all_together['commitedL3Misses']), all_together
             title = "" if not 'title' in EXTRA else EXTRA['title']
             if 'title' in EXTRA:
                 plt.title(EXTRA['title'])
-            save_fig(f'./_finos/fii/{folder}{"/LLC_ONLY_" if LLC_ONLY else ""}{sf}A__{"HOT_" if BY_HOT else ""}{"ERVIEW" if ERROR_VIEW else ""}{"BY_MOMENT" if BY_MOMENT else ""} {INTENSITY_metric if INTENSITY_metric else  ""} - {NORM} globos de ouroOO_OO_OO' + k.replace("/", "D") + " " + x_key.replace("/","D") + "_" + DATASET_S + '.png')
+            save_fig(f'./_finos/fii/{folder}{"/LLC_ONLY_" if LLC_ONLY else ""}{sf}A__{"HOT_" if BY_HOT else ""}{"ERVIEW" if ERROR_VIEW else ""}{"BY_MOMENT" if BY_MOMENT else ""} {INTENSITY_metric if INTENSITY_metric else  ""} - {NORM} globos de ouroOO_OO_OO' + k.replace("/", "D") + " " + x_key.replace("/","D") + "_" + DATASET_S + '.pdf'.replace(" ", "_"))
             print("Saved!")
             def hexa_plot():
                 plt.figure(figsize=(20,20))
@@ -11145,7 +11198,7 @@ np.array(all_together['commitedL3Misses']), all_together
         plt.ylabel('Increase in detected LLC misses (%)')
         plt.tight_layout()
         #plt.subplots_adjust(top=0.88, left=0.88)  
-        save_fig("./_finos/fii/__speedup_llcWEIRD_SLOW.png")
+        save_fig("./_finos/fii/__speedup_llcWEIRD_SLOW.pdf")
         plt.close()
 
         y1 = sq__EDGE_normal_slow 
@@ -11157,7 +11210,7 @@ np.array(all_together['commitedL3Misses']), all_together
 
         plt.tight_layout()
         #plt.subplots_adjust(top=0.88, left=0.88)  
-        save_fig("./_finos/fii/__speedup_squsah_SLOW.png")
+        save_fig("./_finos/fii/__speedup_squsah_SLOW.pdf")
         plt.close()
         
 
@@ -11194,7 +11247,7 @@ np.array(all_together['commitedL3Misses']), all_together
 
     def global_plots():
         print("Doing global global plots!")
-        do_parallel = 2
+        do_parallel = 4
         if do_parallel % 2 == 0:
             for x in x_keys:
                 for k in all_together:

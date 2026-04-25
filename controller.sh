@@ -257,13 +257,13 @@ synthethics_all_80(){
         update_program_variables
     benchnr=41000
                 for reds in  10 1 100; do
-        for ratio in 0,5 1 2 4 8; do # 32 100; do
+        for ratio in 0 5 1 2 4 8 16 32 64; do # 32 100; do
                         #loops=$((3000*)) # 3 million reads of each
                         aptr=$reds
                         arand=$((reds*ratio))
                         looops=10000000000
                         loops=1000000000
-                        update_program_variables
+                        OUTA_FILE=$BINARY
                         exec=$BINARY
                         WORKDIR="$nas/latency_benchmark/tests_syn/plot_time_math"
                         BINARY="$WORKDIR/outa"  ########################################################################################
@@ -272,7 +272,8 @@ synthethics_all_80(){
                         ARGS="$args"; STDIN=""; WORKDIR="$WORKDIR"; # size=simsmall
                         SKIP_SECONDS=50
                         TIMEOUT_SECONDS=60 # 1 minutes 
-                    #_do_gem5_skip 0  ########################################################################################
+                        update_program_variables
+                    _do_gem5_skip 0 &  ########################################################################################
                     #_do_gem5_skip 80
                     #exit
 
@@ -280,7 +281,9 @@ synthethics_all_80(){
 
         benchnr=$(($benchnr+1))
                 done
+                wait
                 done
+                continue
 
                 for reds in  1 2 4 8 16 32 64 128 256 512; do
                         #loops=$((3000*)) # 3 million reads of each
@@ -353,19 +356,23 @@ synthethics_all(){
                         arand=$((reds*ratio))
                         looops=10000000000
                         loops=1000000000
+                        OUTA_FILE=$BINARY
                         update_program_variables
                         exec=$BINARY
                         WORKDIR="$nas/latency_benchmark/tests_syn/plot_time_math"
                         BINARY="$WORKDIR/outa"
+                        #continue
 
                         benchset="synthethic_extended-$arand-$aptr-"
                         ARGS="$args"; STDIN=""; WORKDIR="$WORKDIR"; # size=simsmall
                         SKIP_SECONDS=40
                         TIMEOUT_SECONDS=120 # 2 minutes 
-                    _do_gem5_skip
+                 #   _do_gem5_skip & 
 
         benchnr=$(($benchnr+1))
+        sleep 10 &
                 done
+                wait
 done
 
 
@@ -737,9 +744,9 @@ _do_gem5_skip(){
                     cat $nas/osdi26/results_gem5/err_$benchset\_$benchnr\_$increase\_ 
                     echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) TERMINATED $? $now_time" >> $nas/osdi26/results_gem5/gem5_pids.txt
     } &
-    sleep 1 # give time to write to the gem5 file...
-    disown #keep it running even if the shell dies
-    return
+    #sleep 1 # give time to write to the gem5 file...
+    #disown #keep it running even if the shell dies
+    #return
                     increase=80
     {
         set +xe
@@ -752,7 +759,7 @@ _do_gem5_skip(){
                     wait $pid 
                     echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) TERMINATED $? $now_time" >> $nas/osdi26/results_gem5/gem5_pids.txt
     } &
-    disown
+    #disown
 
 }
 _do_gem5(){
