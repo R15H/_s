@@ -239,11 +239,19 @@ rungem5_with_report(){
                 shift 3
                 echo hi
                 now_time=$(date +%s)
-                    $@  2> $nas/osdi26/results_gem5/err_$benchset\_$benchnr\_$increase\_ | tee $nas/osdi26/results_gem5/output_$benchset\_$benchnr\_$increase\_ & 
+                    errfile="$nas/osdi26/results_gem5/err_${benchset}_${benchnr}_${increase}_"
+                    outfile="$nas/osdi26/results_gem5/output_${benchset}_${benchnr}_${increase}_"
+                    $@ 2> "$errfile" > "$outfile" &
                     pid=$!
                     echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) STARTED $now_time" >> $nas/osdi26/results_gem5/gem5_pids.txt
                     wait $pid
-                    echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) TERMINATED $? $now_time" >> $nas/osdi26/results_gem5/gem5_pids.txt
+                    gem5_exit=$?
+                    if [[ $gem5_exit -ne 0 ]]; then
+                        echo "ERROR: GEM5 exited with code $gem5_exit — bench=$BINARY benchset=$benchset benchnr=$benchnr increase=$increase" >&2
+                        echo "--- last 30 lines of $errfile ---" >&2
+                        tail -30 "$errfile" >&2
+                    fi
+                    echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) TERMINATED $gem5_exit $now_time" >> $nas/osdi26/results_gem5/gem5_pids.txt
     } 
 }
 
@@ -341,17 +349,7 @@ synthethics_all_80(){
 
                 sleep 120
 }
-synthethics_all(){
-    DRAM=2
-    source $nas/latency_benchmark/tests_syn/plot_time_math/plot.sh
-
-
-        owo
-        update_program_variables
-    benchnr=41000
-                for reds in 1 10 100 200; do
-        for ratio in 1 2 4 16 32; do
-                        #loops=$((3000*)) # 3 million reads of each
+__core_synthethic_all(){
                         aptr=$reds
                         arand=$((reds*ratio))
                         looops=10000000000
@@ -366,12 +364,34 @@ synthethics_all(){
                         benchset="synthethic_extended-$arand-$aptr-"
                         ARGS="$args"; STDIN=""; WORKDIR="$WORKDIR"; # size=simsmall
                         SKIP_SECONDS=40
-                        TIMEOUT_SECONDS=120 # 2 minutes 
-                 #   _do_gem5_skip & 
+                        TIMEOUT_SECONDS=30 # 2 minutes 
+                    _do_gem5_skip 
 
+}
+synthethics_all(){
+    DRAM=1
+    source $nas/latency_benchmark/tests_syn/plot_time_math/plot.sh
+
+
+        owo
+        update_program_variables
+    benchnr=41000
+    WARMUP=4
+    memory=4
+                for reds in 1 10; do # 10 100 200; do
+                
+        for ratio in  {0..30..2}; do #19  23 29 2 6 10 14 18 22 26 30; do
+                    __core_synthethic_all &
         benchnr=$(($benchnr+1))
-        sleep 10 &
+        #sleep 10 &
                 done
+                wait
+        for ratio in  {1..30..2}; do #19  23 29 2 6 10 14 18 22 26 30; do
+                    __core_synthethic_all &
+        benchnr=$(($benchnr+1))
+        #sleep 10 &
+                done
+
                 wait
 done
 
@@ -726,39 +746,69 @@ _do_gem5_skip(){
                 CONFIG=$nas/copyyy_bento.py
                 CONFIG_SKIP=$nas/config.end.py
                 CONFIG=$nas/config.end.py
+                #GEM5="gdb -x $nas/osdi26/bin/flush.gdb --args $GEM5"
 
-                #increase=0
+                # Validate required files and variables before launching
+                if [[ ! -x "$GEM5" ]]; then
+                    echo "ERROR: GEM5 binary not found or not executable: $GEM5" >&2; return 1
+                fi
+                if [[ ! -f "$CONFIG" ]]; then
+                    echo "ERROR: GEM5 config not found: $CONFIG" >&2; return 1
+                fi
+                if [[ ! -f "$BINARY" ]]; then
+                    echo "ERROR: benchmark binary not found: $BINARY" >&2; return 1
+                fi
+                for _var in benchset benchnr DRAM SKIP_SECONDS TIMEOUT_SECONDS; do
+                    if [[ -z "${!_var}" ]]; then
+                        echo "ERROR: required variable \$$_var is empty" >&2; return 1
+                    fi
+                done
+
+                increase=0
                 echo "launching gem5 for $BINARY with args $ARGS and stdin $STDIN OR $WORKDIR" 1>&2
 #        set -x
         #set -e
 
     {
                 now_time=$(date +%s)
-                    echo $nas/osdi26/results_gem5/err_$benchset\_$benchnr\_$increase\_ 
-                    echo $nas/osdi26/results_gem5/output_$benchset\_$benchnr\_$increase\_ 
-                    $GEM5 $CONFIG "$BINARY" --latency-increase $increase --bargs "$ARGS" --cpu-start KVM --dramsize=${DRAM}GiB --bstdin "$STDIN" --skip_start_duration $SKIP_SECONDS --exec_timeout $TIMEOUT_SECONDS 2>   $nas/osdi26/results_gem5/err_$benchset\_$benchnr\_$increase\_  > $nas/osdi26/results_gem5/err_$benchset\_$benchnr\_$increase\_   &
-                    #1>$nas/osdi26/results_gem5/output_$benchset\_$benchnr\_$increase\_ & 
+                    errfile="$nas/osdi26/results_gem5/err_${benchset}_${benchnr}_${increase}_"
+                    outfile="$nas/osdi26/results_gem5/output_${benchset}_${benchnr}_${increase}_"
+                    echo "$errfile ERRRRRRRRRRRRRRR"
+                    echo "$outfile OOOOOOOOOOOOOOUU"
+                    $GEM5 $CONFIG "$BINARY" --latency-increase $increase --bargs "$ARGS" --cpu-start KVM --dramsize=${DRAM}GiB --bstdin "$STDIN" --skip_start_duration $SKIP_SECONDS --exec_timeout $TIMEOUT_SECONDS 2> "$errfile" 1> "$outfile" 
                     pid=$!
                     echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) STARTED $now_time" >> $nas/osdi26/results_gem5/gem5_pids.txt
                     wait $pid
-                    cat $nas/osdi26/results_gem5/err_$benchset\_$benchnr\_$increase\_ 
-                    echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) TERMINATED $? $now_time" >> $nas/osdi26/results_gem5/gem5_pids.txt
-    } &
+                    gem5_exit=$?
+                    if [[ $gem5_exit -ne 0 ]]; then
+                        echo "ERROR: GEM5 exited with code $gem5_exit — bench=$BINARY benchset=$benchset benchnr=$benchnr increase=$increase" >&2
+                        echo "--- last 30 lines of $errfile ---" >&2
+                        tail -30 "$errfile" >&2
+                    fi
+                    echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) TERMINATED $gem5_exit $now_time" >> $nas/osdi26/results_gem5/gem5_pids.txt
+    } 
     #sleep 1 # give time to write to the gem5 file...
     #disown #keep it running even if the shell dies
     #return
                     increase=80
     {
-        set +xe
                 now_time=$(date +%s)
-                    echo $nas/osdi26/results_gem5/err_$benchset\_$benchnr\_$increase\_ 
-                    echo $nas/osdi26/results_gem5/output_$benchset\_$benchnr\_$increase\_ 
-                    $GEM5 $CONFIG "$BINARY" --latency-increase $increase --bargs "$ARGS" --cpu-start KVM --dramsize=8GiB --bstdin "$STDIN" --skip_start_duration $SKIP_SECONDS --exec_timeout $TIMEOUT_SECONDS 2> $nas/osdi26/results_gem5/err_$benchset\_$benchnr\_$increase\_ 1>$nas/osdi26/results_gem5/output_$benchset\_$benchnr\_$increase\_ & 
+                    errfile="$nas/osdi26/results_gem5/err_${benchset}_${benchnr}_${increase}_"
+                    outfile="$nas/osdi26/results_gem5/output_${benchset}_${benchnr}_${increase}_"
+                    echo "$errfile"
+                    echo "$outfile"
+                    $GEM5 $CONFIG "$BINARY" --latency-increase $increase --bargs "$ARGS" --cpu-start KVM --dramsize=8GiB --bstdin "$STDIN" --skip_start_duration $SKIP_SECONDS --exec_timeout $TIMEOUT_SECONDS 2> "$errfile" 1> "$outfile" &
                     pid=$!
                     echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) STARTED $now_time" >> $nas/osdi26/results_gem5/gem5_pids.txt
-                    wait $pid 
-                    echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) TERMINATED $? $now_time" >> $nas/osdi26/results_gem5/gem5_pids.txt
-    } &
+                    wait $pid
+                    gem5_exit=$?
+                    if [[ $gem5_exit -ne 0 ]]; then
+                        echo "ERROR: GEM5 exited with code $gem5_exit — bench=$BINARY benchset=$benchset benchnr=$benchnr increase=$increase" >&2
+                        echo "--- last 30 lines of $errfile ---" >&2
+                        tail -30 "$errfile" >&2
+                    fi
+                    echo "pid: $pid benchset: $benchset benchnr: $benchnr bench: $BINARY increase: $increase host: $(hostname) TERMINATED $gem5_exit $now_time" >> $nas/osdi26/results_gem5/gem5_pids.txt
+    } 
     #disown
 
 }

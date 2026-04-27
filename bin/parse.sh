@@ -77,6 +77,13 @@ parse_gem5_output(){
 }
 
 export -f parse_gem5_output
+safe(){
+	range=$1
+	bench=$2
+	tac $results_folder/gem5_pids.txt | head -n  $range | grep $bench |  awk '{print $2}' | uniq | xargs -I {} -P 10 /mnt/nas/inesc/ist196723/osdi26/bin/parse.sh parse_gem5_output {} # while read pid; do parse_gem5_output $pid; done
+
+
+}
 go(){
 gcc sample_parser.c -O3 -o sample_parser || exit 
 #grep npb_result-iter | grep cg.D | 

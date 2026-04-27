@@ -12,6 +12,9 @@ from scipy import stats
 
 import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+from matplotlib.colors import LinearSegmentedColormap
+_CMAP_BLACK_RED = LinearSegmentedColormap.from_list('black_red', ['black', 'red'])
 
 import argparse as _ap
 _p = _ap.ArgumentParser(description="python_parserFTW knobs")
@@ -1270,12 +1273,14 @@ def cdf_inst():
                     }
                     for line in lines:
                         v = line.split(" ")
+                        v.append(0); v.append(0); v.append(0); v.append(0);
                         d['address'].append(v[0])
                         if int(v[1]) == 0:
                             continue
                         d['Access time'].append(int(v[1]))
                         d['Stall Cycles'].append(int(v[2]))
                         d['Stall Cycles/MLP'].append(int(v[4]))
+                        d['MLP'].append(int(v[2])/int(v[4]))
                         d['o1'].append(int(v[-2]))
                         d['o2'].append(int(v[-3]))
                         d['Frequency'].append(int(v[5]))
@@ -1290,10 +1295,10 @@ def cdf_inst():
             plt.ylabel("Frequency")
             f = (f"{FIGS_FOLDER}/{RESULT_FOLDER}/{file}_stallsmlp_freqNEW.pdf")
             print("saved",  f)
+
             plt.savefig(f)
             plt.close()
 
-            
             f = ""
             if "bc" in file.split("-")[1]:
                 f = "GAPBS - Betweeness Centrality"
@@ -1301,8 +1306,39 @@ def cdf_inst():
                 f = "PARSEC - cg.D"
             elif "mg.C" in file:
                 f = "PARSEC - mg.C"
+            elif "pr" in file:
+                f = "GAPBS - PageRank"
+            elif "bfs" in file:
+                f = "GAPBS - Breadth-First Search"
+
+            # 3-var scatter: Access Time vs Stall Cycles, colored by Stall Cycles/MLP
+            mlp_vals = d['Stall Cycles/MLP']
+            mlp_vals = d['MLP']
+            _vmin = max(1, min(mlp_vals))
+            _vmax = max(mlp_vals)
+            fig, ax = plt.subplots(figsize=(8, 6))
+            sc = ax.scatter(
+                d['Access time'],
+                d['Stall Cycles'],
+                c=mlp_vals,
+                norm=mcolors.LogNorm(vmin=_vmin, vmax=_vmax),
+                #cmap='hot',
+                cmap='plasma',
+                alpha=0.6,
+                s=10
+            )
+            cbar = fig.colorbar(sc, ax=ax)
+            cbar.set_label("Stall Cycles/MLP")
+            ax.set_xlabel("Access Time")
+            ax.set_ylabel("Stall Cycles")
+            ax.set_title(f"Access Time vs Stall Cycles (color=Stall Cycles/MLP)\n{f}")
+            f3 = (f"{FIGS_FOLDER}/{RESULT_FOLDER}/{file}_access_stalls_mlp_scatter.pdf")
+            print("saved", f3)
+            plt.savefig(f3)
+            plt.close()
+
                 
-            plt.title("CDF of instruction metrics for " +f)
+            plt.title("CDF of Instruction Metrics for " +f)
             plt.xlabel("Metric")
             for i in ['Stall Cycles', 'Access time','Stall Cycles/MLP']:
                 sorted_data, cdf = get_cdf_array(d[i])
@@ -1325,6 +1361,97 @@ def cdf_inst():
         plt.savefig(f"{FIGS_FOLDER}/{RESULT_FOLDER}/{file}.png")
         plt.close()
         """
+def scatter_combined_access_stalls_mlp(shared_legend=False):
+    folder = "/mnt/nas/inesc/ist196723/osdi26/final_data/_mu_inst/"
+    targets = {
+        "benches_final-bc0-2":      "GAPBS - Betweenness Centrality",
+        "bu-mg.C":                  "NPB - mg.C",
+        "npb_result-iter-cg.D0-6":  "NPB - cg.D",
+    }
+
+    datasets = {}
+    for fname, label in targets.items():
+        d = {'Access time': [], 'Stall Cycles': [], 'Stall Cycles/MLP': []}
+        with open(folder + fname, 'r') as fh:
+            for line in fh.readlines()[1:]:
+                v = line.split(" ")
+                v += [0] * 4
+                if int(v[1]) == 0:
+                    continue
+                d['Access time'].append(int(v[1]))
+                d['Stall Cycles'].append(int(v[2]))
+                if "mg" in fname:
+                    d['Stall Cycles/MLP'].append(int(v[3]))
+                else: 
+                    d['Stall Cycles/MLP'].append(int(v[4]))
+                #d['MLP'].append(int(v[2])/int(v[4]))
+        datasets[label] = d
+
+    all_mlp = [x for d in datasets.values() for x in d['Stall Cycles/MLP']]
+    norm = mcolors.LogNorm(vmin=max(1, min(x for x in all_mlp if x > 0)), vmax=200)
+    inferno_clipped = mcolors.LinearSegmentedColormap.from_list('inferno_clipped', plt.cm.inferno(np.linspace(0, 0.88, 256)))
+    #norm = mcolors.Normalize(vmin=max(1, min(x for x in all_mlp if x > 0)), vmax=200)
+    # print dist of all_mlp
+    cdf_keys = ['Stall Cycles', 'Access time', 'Stall Cycles/MLP']
+
+    fig, axes = plt.subplots(2, 3, figsize=(15, 7), constrained_layout=True)
+    sc = None
+    i = 0
+    for col, (label, d) in enumerate(datasets.items()):
+        i+=1
+        ax_sc = axes[0, col]
+        sc = ax_sc.scatter(
+            d['Access time'], d['Stall Cycles'],
+            c=d['Stall Cycles/MLP'],
+            norm=norm, 
+            #cmap='viridis',
+            cmap=inferno_clipped,
+            #cmap='plasma',
+            #cmap='coolwarm',
+            alpha=0.6, s=10
+        )
+        ax_sc.set_title(label)
+        ax_sc.set_xlabel("Access Time")
+        ax_sc.set_xlim(0, 500)
+        ax_sc.set_ylim(0, 550)
+        if col == 0:
+            ax_sc.set_ylabel("Stall Cycles")
+        ax_sc.set_xlim(0, 500)
+        ax_sc.set_ylim(0, 550)
+        if i == 1:
+            ax_sc.set_ylim(0, 800)
+            ax_sc.set_xlim(0, 800)
+
+
+        ax_cdf = axes[1, col]
+        for key in cdf_keys:
+            sorted_data, cdf = get_cdf_array(np.array(d[key]))
+            ax_cdf.plot(sorted_data, cdf, label=key)
+        ax_cdf.set_xlabel("Metric")
+        if col == 0:
+            ax_cdf.set_ylabel("CDF")
+        if shared_legend:
+            if col == 0:
+                _cdf_handles, _cdf_labels = ax_cdf.get_legend_handles_labels()
+        else:
+            ax_cdf.legend(fontsize=8, loc='lower right')
+
+    cbar = fig.colorbar(sc, ax=axes[0].tolist(), label="Stall Cycles/MLP", extend='max')
+    cbar_ticks = [10, 25, 50, 100, 200]
+    cbar.set_ticks(cbar_ticks)
+    cbar.set_ticklabels([str(t) for t in cbar_ticks])
+    if shared_legend:
+        fig.legend(_cdf_handles, _cdf_labels, loc='upper right',
+                   bbox_to_anchor=(0.995, 0.44), bbox_transform=fig.transFigure,
+                   fontsize=8, frameon=True)
+    fig.suptitle("Benchmark Characterization with AsMem")
+
+    out = f"{FIGS_FOLDER}/_mu_inst/AAAAcombined_bc_mgC_cgD_scatter.pdf"
+    print("saved", out)
+    plt.savefig(out, bbox_inches='tight')
+    plt.close()
+
+
 def scatter_mlpweighted_vs_last():
     import glob
     import re
@@ -3612,26 +3739,32 @@ class WEIGHT_FIELD(IntEnum):
     AGG_STORE_COST = 13
     MLP_WEIGHTED_AGG = 14
     BMW_METRIC = 15
+    # positions 16-17: two derived fields appended by simple_weight after the 16 base fields
+    BMW_METRIC_FREQ = 16
+    MLP_BY_MEAN_FREQ = 17
+    # positions 18+: 80th-percentile run (same layout, offset=18)
+
+    _EIGHTY_OFFSET = 18  # simple_weight writes 18 fields before the eighty block
 
     @classmethod
     def get_name(cls, idx: int) -> str:
         base_field = next((member for member in cls if member.value == idx), None)
-        base = ""
-        if base_field is None:
-            base_field = next((member for member in cls if member.value+16 == idx), None)
-            base = "80"
+        if base_field is not None:
+            return base_field.name
+        base_field = next((member for member in cls if member.value + cls._EIGHTY_OFFSET == idx), None)
         if base_field is None:
             return "UNKNOWN MAN..."
-        return base_field.name +  base
+        return base_field.name + "80"
 
     @classmethod
-    def get_from(cls,   field_name: str, type_idx: int = 0) -> int:
+    def get_from(cls, field_name: str, type_idx: int = 0) -> int:
         """
-        Get the position for a field name in the given type (0=first line, 1=second line at +16).
-        Usage: parts[RecordField.get_position("TOTAL_TIME", 1)]  # second type TOTAL_TIME
+        Get the column index for a field name.
+        type_idx=0 → base run, type_idx=1 → 80th-percentile run (offset 18).
+        Usage: parts[RecordField.get_position("TOTAL_TIME", 1)]
         """
         field = cls[field_name]
-        return field.value + (type_idx * 16)
+        return field.value + (type_idx * cls._EIGHTY_OFFSET)
 
 
 """
@@ -3761,6 +3894,7 @@ python3 bin/python_parser.py "simple_weight()"
 writes=0
 def psw___(): # plot syntehthic weights 
     RESULT_FOLDER="/mnt/nas/inesc/ist196723/osdi26/final_data/multiIII100/synthethic_extended-*-*"
+    #./final_data/_mu_inst/
     RESULT_FOLDER="/mnt/nas/inesc/ist196723/osdi26/final_data/_mu/synthethic_extended-*-*"
     #reads = [int(i) for i in  ("1 2 4 8 16 32 64 128 256 512 " * 2 ).split(" ") ] # arand only , combined,
     
@@ -3854,6 +3988,8 @@ def psw___(): # plot syntehthic weights
     impo = 1
     if impo % 2 == 0:
         for weight in FIELDSSS:
+            neg = df_merged[(df_merged[weight+"80_ptr"] - df_merged[weight+"_ptr"]) * (df_merged[weight+"80_str"] - df_merged[weight+"_str"]) < 0]
+            print("NEGA",neg[["arand","aptr", weight+"_ptr", weight+"80_ptr", weight+"_str", weight+"80_str"]])
             _  = df_inst1
             
             for df_inst1    in [_, df_inst2]:
@@ -3953,84 +4089,37 @@ def psw___(): # plot syntehthic weights
                 #print(df[inst_sel][str(weight)+"80"], "weightttttttttttttttyyy")
 
     #plt.plot(df["ADDR"] == str(aptr_inst))
-    plt.title("Instruction weights in function of parameters")
+    plt.title("Ptr Chasing / Streaming weight proportion vs number of reads")
 
-    # --- LEGEND (3 separate sections) ---
-
-    # Section 1: Access pattern (shapes)
-    pattern_handles = [
-        mlines.Line2D([], [], color='gray', marker='o', linestyle='None', markersize=9, label='Streaming'),
-        mlines.Line2D([], [], color='gray', marker='x', linestyle='None', markersize=9, label='Ptr Chase'),
-    ]
-
-    # Section 2: Metric (colors)
-    metric_handles = [
-        mlines.Line2D([], [], color='blue',   marker='s', linestyle='None', markersize=9, label='MLP_BY_MEAN'),
-        mlines.Line2D([], [], color='orange', marker='s', linestyle='None', markersize=9, label='TOTAL_TIME'),
-        mlines.Line2D([], [], color='purple', marker='s', linestyle='None', markersize=9, label='STALL_TIME'),
-    ]
-
-    # Section 3: Measurement type (opacity)
-    type_handles = [
-        mlines.Line2D([], [], color='black', marker='s', linestyle='None', markersize=9, alpha=1.0, label='Raw'),
-        mlines.Line2D([], [], color='black', marker='s', linestyle='None', markersize=9, alpha=0.3, label='Δ (vs baseline)'),
-    ]
-
-    # Combine with blank spacer titles using a "title-only" handle trick
     from matplotlib.patches import Patch
-    spacer = Patch(color='none')  # invisible spacer
+    spacer = Patch(color='none')
 
-    all_handles = (
-        [spacer] + pattern_handles +
-        [spacer] + metric_handles +
-        [spacer] + type_handles
-    )
-    all_labels = (
-        ["── Access Pattern ──"] + ['Streaming', 'Ptr Chase'] +
-        ["── Metric ──"] + ['MLP_BY_MEAN', 'TOTAL_TIME', 'STALL_TIME'] +
-        ["── Measurement ──"] + ['Raw', 'Δ (vs baseline)']
-    )
-    """
-    import matplotlib.lines as mlines
-    # legend saying X is Ptr Chase
-    # O is Streaming
-    # and then , one color for Total Time, another for .... 
-    # 1. Access Pattern Legend (Markers)
-    pattern_handles = [
-        mlines.Line2D([], [], color='black', marker='o', linestyle='None',
-                    markersize=10, label='Streaming'),
-        mlines.Line2D([], [], color='black', marker='x', linestyle='None',
-                    markersize=10, label='Ptr Chase')
-    ]
 
-    # 2. Metric Legend (Colors)
+    # One entry per metric: color encodes the weight type
     metric_handles = [
-        mlines.Line2D([], [], color='blue', marker='s', linestyle='None', 
-                    markersize=10, label='MLP_BY_MEAN'),
-        mlines.Line2D([], [], color='orange', marker='s', linestyle='None', 
-                    markersize=10, label='TOTAL_TIME'),
-        mlines.Line2D([], [], color='purple', marker='s', linestyle='None', 
-                    markersize=10, label='STALL_TIME')
+        mlines.Line2D([], [], color='blue',   marker='s', linestyle='None', markersize=9, label='Access Time'),
+        mlines.Line2D([], [], color='orange', marker='s', linestyle='None', markersize=9, label='Stall Time'),
+        mlines.Line2D([], [], color='purple', marker='s', linestyle='None', markersize=9, label='Stall Time / MLP'),
     ]
 
-    # Combine them or add separately
-    # Option A: Single combined legend
-    all_handles = pattern_handles + metric_handles
-    plt.legend(handles=all_handles, loc='upper right', title="Legend")
+    # Two series per metric: raw ratio vs delta ratio
+    series_handles = [
+        mlines.Line2D([], [], color='black', marker='s', linestyle='None', markersize=9, alpha=1.0,
+                      label='Ptr Chasing weight / Streaming weight'),
+        mlines.Line2D([], [], color='black', marker='s', linestyle='None', markersize=9, alpha=0.4,
+                      label='ΔPtr Chasing weight / ΔStreaming weight'),
+    ]
 
-
-    # Option B: Two separate legends (fancier)
-    #leg1 = plt.legend(handles=pattern_handles, loc='upper left', title="Patterns")
-    #plt.gca().add_artist(leg1) # Add first back manually
-    #plt.legend(handles=metric_handles, loc='upper right', title="Metrics")
-
-    #plt.title("
-    """
+    all_handles = [spacer] + metric_handles + [spacer] + series_handles
+    all_labels  = (
+        ["── Weight ──"] + ['Access Time', 'Stall Time', 'Stall Time / MLP'] +
+        ["── Series ──"] + ['Ptr Chasing / Streaming', 'ΔPtr Chasing / ΔStreaming']
+    )
 
     plt.legend(all_handles, all_labels, loc='upper right', framealpha=0.9)
 
-    plt.xlabel("Number of reads")
-    plt.ylabel("Weight")
+    plt.xlabel("Number of reads (arand = aptr)")
+    plt.ylabel("Ptr Chasing weight / Streaming weight")
     #plt.legend()
     plt.xlim(0,130)
     #plt.ylim(0)
@@ -4040,9 +4129,110 @@ def psw___(): # plot syntehthic weights
     print(df)
     print("bru")
 
+    # --- additional plot: aptr * ptr_cost / (arand * str_cost), arand fixed at 1 ---
+    dm1 = df_merged[df_merged["arand"] == 1].sort_values("aptr")
+    if not dm1.empty:
+        plt.figure()
+        x = dm1["aptr"].values
+        arand_val = dm1["arand"].values  # all == 1
+        print(len(arand_val), len(df_merged))
+        #print(df_merged.columns.tolist())
+        #exit(0)
+
+        mlp_ratio = (x * dm1["MLP_WEIGHTED_AGG_ptr"].values /
+                     (arand_val * dm1["MLP_WEIGHTED_AGG_str"].values))
+        delta_mlp_ratio = (x * (dm1["MLP_WEIGHTED_AGG80_ptr"].values - dm1["MLP_WEIGHTED_AGG_ptr"].values) /
+                           (arand_val * (dm1["MLP_WEIGHTED_AGG80_str"].values - dm1["MLP_WEIGHTED_AGG_str"].values)))
+
+        plt.plot(x, mlp_ratio,       marker='o', label='aptr × MLP weighted / arand × MLP weighted')
+        plt.plot(x, delta_mlp_ratio, marker='x', label='aptr × ΔMLP weighted / arand × ΔMLP weighted', alpha=0.7)
+
+        plt.xlabel("Number of Ptr Chasing reads (aptr,  arand=1)")
+        plt.ylabel("aptr × ptr cost  /  arand × str cost")
+        plt.title("Real cost VS estimated cost")
+        plt.legend()
+        plt.savefig("./good_weightsss_arand1.svg")
+        print("./good_weightsss_arand1.svg")
 
 
-    
+
+
+
+def psw_line___():
+    """Line plot: x=arand, y=ratio(arand cost / aptr cost) per weight field."""
+    RESULT_FOLDER = "/mnt/nas/inesc/ist196723/osdi26/final_data/_mu/synthethic_extended-*-*"
+
+    aptr_inst = 14416; arand_inst = 13667
+
+    df = pd.DataFrame()
+    for f in glob.glob(RESULT_FOLDER):
+        arand = int(f.split("extended-")[1].split("-")[0])
+        aptr  = int(f.split("extended-")[1].split("-")[1])
+        fh = open(f, 'r'); lines = fh.readlines(); fh.close()
+        for l in lines:
+            if not l.startswith(str(aptr_inst)) and not l.startswith(str(arand_inst)):
+                continue
+            row = {'aptr': aptr, 'arand': arand}
+            for i, entry in enumerate(l.split(" ")):
+                if entry in ("\n", ''):
+                    continue
+                row[WEIGHT_FIELD.get_name(i)] = int(entry)
+            df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+
+    df = df.sort_values(by="arand")
+    print(f"[psw_line] total rows loaded: {len(df)}  (ptr rows: {(df['ADDR']==aptr_inst).sum()}, str rows: {(df['ADDR']==arand_inst).sum()})")
+
+    df_ptr = df[df["ADDR"] == aptr_inst].reset_index(drop=True)
+    df_str = df[df["ADDR"] == arand_inst].reset_index(drop=True)
+    df_merged = pd.merge(df_ptr, df_str, on=["arand", "aptr"], suffixes=("_ptr", "_str"))
+    df_merged = df_merged.sort_values("arand")
+    print(f"[psw_line] merged rows: {len(df_merged)},  arand range: {df_merged['arand'].min()}–{df_merged['arand'].max()}")
+
+    FIELDSSS = ["AVG_INST_COST_160", "TOTAL_TIME", "STALL_TIME"]
+    weight_colors = ['blue', 'orange', 'purple']
+    weight_labels = ['Access Time', 'Stall Time', 'Stall Time / MLP']
+
+    def safe_ratio(num, den, thresh=1.0):
+        """Return num/den, masking denominators with |den| < thresh as NaN."""
+        den = den.copy().astype(float)
+        den[den.abs() < thresh] = float('nan')
+        return num / den
+
+    plt.figure()
+    for weight, color, label in zip(FIELDSSS, weight_colors, weight_labels):
+        x = df_merged["arand"]
+        ptr_vals = df_merged[weight + "_ptr"]
+        str_vals = df_merged[weight + "_str"]
+        ratio = safe_ratio(ptr_vals, str_vals)
+        print(f"\n[psw_line] weight={weight}")
+        print(f"  ptr  min={ptr_vals.min():.1f}  max={ptr_vals.max():.1f}  mean={ptr_vals.mean():.1f}")
+        print(f"  str  min={str_vals.min():.1f}  max={str_vals.max():.1f}  mean={str_vals.mean():.1f}")
+        print(f"  ratio min={ratio.min():.3f}  max={ratio.max():.3f}  mean={ratio.mean():.3f}")
+        zero_den = (str_vals == 0).sum()
+        if zero_den:
+            print(f"  WARNING: {zero_den} rows with zero str denominator (skipped as NaN)")
+        plt.plot(x, ratio, marker='o', color=color, label=label)
+
+        if (weight + "80_ptr") in df_merged.columns and (weight + "80_str") in df_merged.columns:
+            delta_ptr = df_merged[weight + "80_ptr"] - df_merged[weight + "_ptr"]
+            delta_str = df_merged[weight + "80_str"] - df_merged[weight + "_str"]
+            delta_ratio = safe_ratio(delta_ptr, delta_str, thresh=50.0)
+            print(f"  delta_ptr min={delta_ptr.min():.1f}  max={delta_ptr.max():.1f}")
+            print(f"  delta_str min={delta_str.min():.1f}  max={delta_str.max():.1f}")
+            print(f"  delta_ratio min={delta_ratio.min():.3f}  max={delta_ratio.max():.3f}  (NaN masked: {delta_ratio.isna().sum()})")
+            plt.plot(x, delta_ratio, marker='x', color=color,
+                     linestyle='--', alpha=0.5, label=label + " (delta)")
+
+    plt.axhline(y=1.0, color='black', linestyle=':', linewidth=0.8)
+    plt.xlabel("Number of random reads (arand)")
+    plt.ylabel("arand cost / aptr cost (per weight)")
+    plt.title("Ratio arand / aptr cost vs number of reads")
+    plt.legend()
+    plt.xlim(0, 30)
+    plt.savefig("./good_weights_line.svg")
+    print("./good_weights_line.svg")
+
+
 def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignore_inst = True):
     global run_meta
     global DATA_FOLDER
@@ -4057,7 +4247,7 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
 
                                                                                                 # 'syn'
                                                                                                  ]])#'sp.B' ]] ) # sroms', 'pr', 'lbm','cact',  'bc']])
-    rejectuss = lambda data,r :  all([a not in data[r]['0']['line'] for a in ['cg.D' ]] ) # 'bc', 'mg.C', 'cg.D', "gapbs"]])
+    rejectuss = lambda data,r :  all([a not in data[r]['0']['line'] for a in ['outa' ]] ) # 'bc', 'mg.C', 'cg.D', "gapbs"]])
                              
     if OLD_V4:
 
@@ -4070,6 +4260,8 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
     if MULTI:
         RESULT_FOLDER="_mu"
         RESULT_FOLDER="_mu_inst"
+    else:
+        RESULT_FOLDER="_mu"
     if OVERRIDE_OUTPUT_FOLDER: 
         RESULT_FOLDER=OVERRIDE_OUTPUT_FOLDER
     if INSTRUCTION_ONLY:
@@ -4216,8 +4408,8 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
                 pass
                 #return
         else:
-            print("Not multi we die")
-            return
+            #print("Not multi we die")
+            #return
             pass
             #return
         for k in keys_used:
@@ -10521,21 +10713,20 @@ np.array(all_together['commitedL3Misses']), all_together
                         f'./_finos/fii/{folder}/{sf}_ACCESS_DIST_' + unit + DATASET_S +    ".pdf"
                     )
                     print("SAVED FIG TO ", file)
-                    print("Saved FIG TO ", file)
-                    plt.savefig(file)
+                    plt.savefig(file, bbox_inches='tight')
                     plt.close()
 
-                w = 16/2
-                w = 16
-                plt.figure(); plt.bar(lat_threshold, np.log(np.array(count)), width=w, color=color)
+                w = 7
+                plt.figure(figsize=(14, 5)); plt.bar(lat_threshold, np.log(np.array(count)), width=w, color=color)
                 p(unit=" (log)")
-                plt.figure(); plt.bar(lat_threshold, np.array(count), width=w, color=color)
+                plt.figure(figsize=(14, 5)); plt.bar(lat_threshold, np.array(count), width=w, color=color)
                 p(unit="")
 
             AGG_FUNCTIONS.append(plot_access_count_over_latency)
             if LIMIT_BY_AGG:
                 for f in AGG_FUNCTIONS:
                     f()
+                exit(0)
 
 
 
@@ -12764,7 +12955,7 @@ def cooling_is_bad():
     for ratio in ratios:
         scores1[ratio] = np.array(scores1[ratio])
         scores2[ratio] = np.array(scores2[ratio])
-        plt.plot(scores1[ratio]/scores2[ratio], label=f'ratio {ratio}')
+        plt.plot(scores1[ratio][1:]/scores2[ratio][1:], label=f'ratio {ratio}')
     plt.legend()
     plt.savefig(f'{FIGS_FOLDER}/cooling_is_bad.png')
     plt.close()
