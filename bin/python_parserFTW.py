@@ -84,6 +84,8 @@ _p.add_argument("--function",       type=str,             default=None,         
 _p.add_argument("--skip_gem5", action="store_true", default=False, help="Skip parsing gem5 data")
 _p.add_argument("-data-instruction-only", help="Instruct to build statistics using only PEBS's emulator data"       )
 _p.add_argument("--ooutput-folder",  type=str, default=None, help="Override output folder"       )
+_p.add_argument("--parallel-corr-mode", choices=("slowdown", "llc", "both"), default="slowdown",
+                help="Correlation target for the per-benchmark parallel-coordinate plot.")
 _p.add_argument("-old_v4"       )
 _args, _unknown = _p.parse_known_args()
 
@@ -104,6 +106,7 @@ NO_WINSOR           = _args.no_winsor
 TRACE_MODE          = _args.trace_mode if _args.trace_mode is not None else sys.maxsize
 OVERRIDE_OUTPUT_FOLDER = _args.ooutput_folder
 INSTRUCTION_ONLY = _args.ooutput_folder
+PARALLEL_CORR_MODE = _args.parallel_corr_mode
 def ALL_DESIRED_KEYS(globy):
     #return  ' Load/Store bound cycles' in key.lower()
     return False
@@ -925,7 +928,7 @@ def plot_llc_change():
     else:
         plt.xticks(xticks, xlabels, rotation=85, ha='center', fontsize=_font)
 
-    plt.title("Real: Memory tier effect on detected LLC miss count", fontsize=_font)
+    plt.title("Real Memory tier effect on detected LLC miss count", fontsize=_font)
     plt.xlabel("Benchmark suite", fontsize=_font)
     plt.ylabel("LLC miss (%)", fontsize=_font)
     if PAPER:
@@ -1571,7 +1574,7 @@ def scatter_combined_access_stalls_mlp(shared_legend=False):
             cmap=inferno_clipped,
             #cmap='plasma',
             #cmap='coolwarm',
-            alpha=0.6, s=10
+            alpha=0.6, s=10, rasterized=True
         )
         ax_sc.set_title(label)
         ax_sc.set_xlabel("Access Time")
@@ -1611,7 +1614,7 @@ def scatter_combined_access_stalls_mlp(shared_legend=False):
 
     out = f"{FIGS_FOLDER}/_mu_inst/AAAAcombined_bc_mgC_cgD_scatter.pdf"
     print("saved", out)
-    plt.savefig(out, bbox_inches='tight')
+    plt.savefig(out, bbox_inches='tight', dpi=300)
     plt.close()
 
 
@@ -1662,7 +1665,7 @@ def scatter_only_bc_mgC_cgD(paper=False):
             c=d['Stall Cycles/MLP'],
             norm=norm,
             cmap=inferno_clipped,
-            alpha=0.6, s=marker_size
+            alpha=0.6, s=marker_size, rasterized=True
         )
         ax_sc.set_title(label, fontsize=fs_title)
         ax_sc.set_xlabel("Access Time", fontsize=fs_base)
@@ -1686,7 +1689,7 @@ def scatter_only_bc_mgC_cgD(paper=False):
     suffix = "_paper" if paper else ""
     out = f"{FIGS_FOLDER}/_mu_inst/AAAAscatter_only_bc_mgC_cgD{suffix}.pdf"
     print("saved", out)
-    plt.savefig(out, bbox_inches='tight')
+    plt.savefig(out, bbox_inches='tight', dpi=600 if paper else None)
     plt.close()
 
 
@@ -1744,7 +1747,7 @@ def cdf_only_bc_mgC_cgD(paper=False):
     suffix = "_paper" if paper else ""
     out = f"{FIGS_FOLDER}/_mu_inst/AAAAcdf_only_bc_mgC_cgD{suffix}.pdf"
     print("saved", out)
-    plt.savefig(out, bbox_inches='tight')
+    plt.savefig(out, bbox_inches='tight', dpi=600 if paper else None)
     plt.close()
 
 
@@ -9081,6 +9084,8 @@ def is_miss_aligned(data,r):
 
 BY_MOMENT=False
 PAPER=False
+COLLECT_PANELS=False
+_collected_panels=[]
 NORM = "user"
 INTENSITY_metric = None
 SKIP_REGRESS = False
@@ -9242,7 +9247,7 @@ def mode_cores():
 
 POINT_VARIABLES = {}
 
-def robust_regress(k, all_together, REGRESS_MODE=SLOWP):
+def robust_regress(k, all_together, REGRESS_MODE=SLOWP, CORR_MODE="slowdown"):
                     global modi
                     #def r_errors(k, REGRESS_MODE=SLOWP):
                     #x_key = "Absolute increase in cycles"
@@ -9290,15 +9295,20 @@ def robust_regress(k, all_together, REGRESS_MODE=SLOWP):
                     from scipy import stats
 
 
-                    modi="SPEARSTO"
-                    
+                    modi = "SLOWDOWN_CORR" if CORR_MODE == "slowdown" else "LLC_SPEARMAN"
 
                     SCALE=1
                     try:
                         regress, residuals, rank, singular_values, rcond  = np.polyfit(new_y*SCALE, new_x, 1, full=True)
-                        correlation, pvalue = np.corrcoef(new_y*SCALE, new_x) # bad unpacking.. but who cares! 
-                        spearman_r, spearman_p = stats.spearmanr(new_y * SCALE, new_x)
-                        spearman_r, spearman_p = stats.spearmanr(new_y, all_together['LLC count'])
+                        correlation = np.corrcoef(new_y*SCALE, new_x)[0, 1]
+                        if CORR_MODE == "llc":
+                            selected_corr, _ = stats.spearmanr(new_y, all_together['LLC count'])
+                        elif CORR_MODE == "slowdown":
+                            selected_corr = correlation
+                        else:
+                            raise ValueError(f"Unknown CORR_MODE: {CORR_MODE}")
+                        if np.isnan(selected_corr):
+                            selected_corr = 0
                     except Exception as e:
                         print(e)
                         raise Exception("Blackkk")
@@ -9309,13 +9319,10 @@ def robust_regress(k, all_together, REGRESS_MODE=SLOWP):
                     BY_MEAN = len(new_x)
                     BY_MEAN = 1
                     ru = np.abs( (ru - new_x)/BY_MEAN) # **2 <-- not squared.. 
-                    if correlation[0] > 1.01:
+                    if correlation > 1.01:
                         print("WHY?=")
                         # exit(0)
-                    if "SPEARSTO" in modi:
-                        out1,out2,out3 = new_y*SCALE, spearman_r,ru #spearman_r, ru# correlation[1], ru correlation[1],
-                    else:
-                        out1,out2,out3 = new_y*SCALE, correlation[1]*correlation[1],ru #spearman_r, ru# correlation[1], ru correlation[1],
+                    out1,out2,out3 = new_y*SCALE, selected_corr,ru
                     
 
                     SSE = np.sum( (ru - new_x)**2 )
@@ -9409,6 +9416,67 @@ def moment_metric_stalls_paper():
     metric_eval()
     SHOULD_PLOT_KEY = lambda x: True
     PAPER = False
+    exit(0)
+
+def stalls_4panel_paper():
+    import matplotlib.patches as mpatches
+    global NORM, BY_MOMENT, PAPER, OTHER_X_KEYS, SHOULD_PLOT_KEY
+    global COLLECT_PANELS, _collected_panels
+
+    _STALL_KEYS = [
+        'Instruction Stall cycles',
+        '∆ Instruction Stall cycles',
+        'Instruction Stall cycles/MLP',
+        '∆ Instruction Stall cycles/MLP',
+    ]
+    SHOULD_PLOT_KEY = lambda x: x in _STALL_KEYS
+    BY_MOMENT = True
+    PAPER = True
+    NORM = "user"
+    OTHER_X_KEYS = [SLOWP]
+    COLLECT_PANELS = True
+    _collected_panels = []
+    metric_eval()
+    COLLECT_PANELS = False
+    SHOULD_PLOT_KEY = lambda x: True
+    PAPER = False
+
+    key_order = {k: i for i, k in enumerate(_STALL_KEYS)}
+    _collected_panels.sort(key=lambda p: key_order.get(p['k'], 99))
+
+    fs = 9
+    fig, axes = plt.subplots(1, 4, figsize=(11.0, 2.5), constrained_layout=True)
+    from scipy.stats.mstats import winsorize
+    for idx, panel in enumerate(_collected_panels):
+        ax = axes[idx]
+        panel['x'] = winsorize(panel['x'], limits=[0.07, 0.07])
+        panel['y'] = winsorize(panel['y'], limits=[0.07, 0.07])
+        # alfa = 0.1 size=0.1 size=0.5
+        print(panel['alfa'], panel['size'])
+        #continue
+        ax.scatter(panel['x'], panel['y'] * 100,
+                   s=panel['size'] / 10, alpha=panel['alfa']/2,
+                   c=panel['colors'], rasterized=True)
+        ax.set_xlabel(panel['x_key'], fontsize=fs)
+        ax.set_ylabel(panel['k'], fontsize=fs)
+        ax.tick_params(labelsize=fs - 1)
+        if '%' in panel['x_key']:
+            ax.ticklabel_format(axis='x', style='plain')
+
+    #return
+    legend_handles = [
+        mpatches.Patch(color='blue',   label='CPU2017'),
+        mpatches.Patch(color='orange', label='GAPBS'),
+        mpatches.Patch(color='purple', label='NPB'),
+        mpatches.Patch(color='grey',   label='Others'),
+    ]
+    fig.legend(handles=legend_handles, loc='outside right upper',
+               fontsize=fs - 1, frameon=True, borderpad=0.4)
+
+    out = './_finos/fii/stalls_4panel_paper.pdf'
+    print("saved", out)
+    plt.savefig(out, bbox_inches='tight', dpi=1200)
+    plt.close()
     exit(0)
 
 def erview():
@@ -11603,7 +11671,7 @@ np.array(all_together['commitedL3Misses']), all_together
                 ext = ".pdf" #".png"
                 #ext = "BRUTO.svg" #".png"
                 path += DATASET_S + ext
-                plt.savefig(path)
+                plt.savefig(path, dpi=600 if PAPER else 300)
                 plt.close()
                 print('Saved fig to ', path)
 
@@ -11826,6 +11894,16 @@ np.array(all_together['commitedL3Misses']), all_together
 
             if "Slow_down" not in x_key:
                 x_var_descriminator = "-" + x_key
+            if COLLECT_PANELS:
+                _collected_panels.append({
+                    'k': k, 'x_key': x_key,
+                    'x': np.array(x_axis),
+                    'y': np.array(all_together[k]),
+                    'colors': np.array(final_colors),
+                    'size': size, 'alfa': alfa,
+                })
+                plt.close()
+                return
             do_scatter(x_axis, all_together[k],size=size, alfa=alfa)
             plt.tick_params(axis='x', labelsize=fontSize)
             plt.tick_params(axis='y', labelsize=fontSize)
@@ -12033,6 +12111,8 @@ np.array(all_together['commitedL3Misses']), all_together
     how_much_over = []
     spearman_llc_stall = []
     def per_bench_f():
+        corr_modes = ["slowdown", "llc"] if PARALLEL_CORR_MODE == "both" else [PARALLEL_CORR_MODE]
+        plot_rows = {m: [] for m in corr_modes}
         _corr_debug_lines = []
         for i,b in enumerate(per_bench):
             p = per_bench[i]
@@ -12081,10 +12161,23 @@ np.array(all_together['commitedL3Misses']), all_together
                             how_much_of_all.append(how_much_of_al)
 
 
-                            _ = robust_regress(k,p)[1]
-                            corres[k].append(_)
-                            sane_cor.append(_ )
-                            _corr_debug_lines.append(f"{'!!!' if _ < 0 else '_'} {key_map[k]} {_} {n} RATIO w/loads {how_many_more} RATIO OF ALL {how_much_of_al} RATIO OVER {how_much_overr} bench line {benchnrrr[i]} {i}")
+                            first_corr = None
+                            for corr_mode in corr_modes:
+                                _ = robust_regress(k, p, CORR_MODE=corr_mode)[1]
+                                if first_corr is None:
+                                    first_corr = _
+                                plot_rows[corr_mode].append({
+                                    "Metric": key_map[k],
+                                    "Correlation": _,
+                                    "bid": i,
+                                    "bench": n,
+                                    "how_many_more": how_many_more,
+                                    "how_much_of_al": how_much_of_al,
+                                    "how_much_overr": how_much_overr,
+                                })
+                                _corr_debug_lines.append(f"{corr_mode} {'!!!' if _ < 0 else '_'} {key_map[k]} {_} {n} RATIO w/loads {how_many_more} RATIO OF ALL {how_much_of_al} RATIO OVER {how_much_overr} bench line {benchnrrr[i]} {i}")
+                            corres[k].append(first_corr)
+                            sane_cor.append(first_corr)
                         except Exception as e:
                             print(e)
                             _corr_debug_lines.append(str(e))
@@ -12093,6 +12186,16 @@ np.array(all_together['commitedL3Misses']), all_together
                             _corr_debug_lines.append(traceback.format_exc())
                             sane_cor.append(0)
                             corres[k].append(0)
+                            for corr_mode in corr_modes:
+                                plot_rows[corr_mode].append({
+                                    "Metric": key_map[k],
+                                    "Correlation": 0,
+                                    "bid": i,
+                                    "bench": n,
+                                    "how_many_more": 0,
+                                    "how_much_of_al": 0,
+                                    "how_much_overr": 0,
+                                })
                         corres_agg[k].append(np.sum(p[k])) # sum of the metric
                         metric.append(key_map[k])
                         agg_slowp.append(np.sum(p["Absolute increase in cycles"])/np.sum(p['Cycles']))
@@ -12128,144 +12231,124 @@ np.array(all_together['commitedL3Misses']), all_together
             _f.write("\n".join(_corr_debug_lines) + "\n")
 
         def plot_correlation_per_bench():
-            #print("EXITO")
-            #exit(0)
             if not BY_MOMENT:
                 return
                 
             import pandas as pd
-            import seaborn as sns
             import matplotlib.pyplot as plt
             
             plt.rcParams.update({
-                'font.size': 14,          # Base text
-                'axes.titlesize': 18,     # Axes titles
-                'axes.labelsize': 18,     # X/Y labels
-                'xtick.labelsize': 17,    # X tick labels
-                'ytick.labelsize': 17,    # Y tick labels
-                'legend.fontsize': 12,    # Legend
-                'figure.titlesize': 80    # Figure title
+                'font.size': 8,
+                'axes.titlesize': 9,
+                'axes.labelsize': 8,
+                'xtick.labelsize': 7,
+                'ytick.labelsize': 8,
+                'legend.fontsize': 7,
+                'figure.titlesize': 9,
             })
-            
-            #plt.figure(figsize=(14, 6))
-            #plt.figure(figsize=( 5.91,	3.65)) 
-            plt.figure(figsize=(14, 4.75))
-            corres_agg_cor = {}
-            rows = []
-            corrLabel =  "Metric correlation w/Slowdown within each benchmark"
-            #for k in corres:
-            #    for i in range(len(corres[k])):
-            #        rows.append({"Metric": str(k), corrLabel: corres[k][i], 'Bench' :get_color_bin( benchcor[i] ) , 'bid': benchcor_id[i] })
-            """
-            for k in corres_agg:
-                #_ = dr(corres_agg_cor, k, robust_regress(k,corres_agg, agg_slowp)[1])
-                print(corres_agg[k], "COOORR")
-                for i in range(len(corres_agg[k])):
-                    rows.append({"Metric": str(k), "Correlation w/Slowdown": corres_agg[k][i], 'Bench' : i })
-            """
-            df = pd.DataFrame({corrLabel: sane_cor, 'Metric' : metric, 'bid' : benchcor_id}).fillna(0)
-            # print full df
-            print(df)
-            #df = df[df['Metric'] != 'SOAR']
+
+            corrLabel = "Correlation"
+            title_map = {
+                "slowdown": "Correlation w/slowdown",
+                "llc": "Rank correlation w/LLC misses",
+            }
             X = 2  # Expected baseline DATASET
             csv_path = f"./_finos/fii/correlations_DATASET_{X}.csv"
             import os
-            
-            if DATASET == X:
-                df.to_csv(csv_path, index=False)
-            else:                
-                df = df[df['Metric'] != 'SOAR']
-                if modi == "SPEARSTO":
-                    df = df[df['Metric'] != 'LLC miss count']
-                if os.path.exists(csv_path):
-                    df_saved = pd.read_csv(csv_path)
-                    soar_baseline = df_saved[df_saved['Metric'] == 'SOAR'].copy()
-                    soar_baseline['Metric'] = 'SOAR'
-                    
-                    unique_bids = pd.DataFrame({'bid': df['bid'].unique()})
-                    soar_joined = pd.merge(unique_bids, soar_baseline, on='bid', how='left')
-                    
-                    missing_bids = soar_joined[soar_joined[corrLabel].isna()]['bid'].tolist()
-                    if missing_bids:
-                        missing_names = [benchname[int(b)] if str(b).isdigit() else b for b in missing_bids]
-                        print("Benchmarks missing SOAR baseline:", missing_names)
-                        
-                    soar_joined[corrLabel] = soar_joined[corrLabel].fillna(-10)
-                    soar_joined['Metric'] = 'SOAR'
-                    
-                    df = pd.concat([df, soar_joined], ignore_index=True)
+
             desired_order = ["SOAR", "LLC miss count", "∆ Stall cycles/MLP", "Stall Cycles/MLP", "Stall Cycles"]
-            df['Metric'] = pd.Categorical(df['Metric'], categories=desired_order, ordered=True)
-            df['bid'] = pd.Categorical(df['bid'])
-            
-            # Sort so that lines are drawn in the strict desired order
-            df = df.sort_values(by=['bid', 'Metric']).dropna(subset=['Metric'])
 
-            xk = 'bid'
-            _row_debug_lines = []
-            for b in df[xk].dropna().unique():
-                df_b = df[df[xk] == b]
-                df_b = df_b[df_b[corrLabel] != -10]
-                if df_b.empty: continue
-                b_idx = int(b) if str(b).isdigit() else b
-                try: color = get_color_bin(benchname[b_idx])
-                except Exception: color = get_color_bin(b)
-                plt.plot(df_b[corrLabel].values, df_b['Metric'].values, marker='o', markersize=8, color=color)
-                
-                for _, row in df_b.iterrows():
-                    print("!!!" if row[corrLabel] < 0 else "_", row['Metric'], row[corrLabel], benchname[b_idx], "RATIO w/loads", ld_st_ratio[b_idx], "RATIO OF ALL", how_much_of_all[b_idx], "RATIO OVER", how_much_over[b_idx], "Spearman LLC/Stall", spearman_llc_stall[b_idx], "bench line", benchnrrr[b_idx], b_idx)
-                    _row_debug_lines.append(f"{'!!!' if row[corrLabel] < 0 else '_'} {row['Metric']} {row[corrLabel]} {benchname[b_idx]} RATIO w/loads {ld_st_ratio[b_idx]} RATIO OF ALL {how_much_of_all[b_idx]} RATIO OVER {how_much_over[b_idx]} Spearman LLC/Stall {spearman_llc_stall[b_idx]} bench line {benchnrrr[b_idx]} {b_idx}")
-                    #  44 ... <---
+            def prepare_df(corr_mode):
+                df = pd.DataFrame(plot_rows[corr_mode]).fillna(0)
+                if DATASET == X and corr_mode == "slowdown":
+                    df.rename(columns={"Correlation": "Metric correlation w/Slowdown within each benchmark"}).to_csv(csv_path, index=False)
+                elif corr_mode == "slowdown":
+                    df = df[df['Metric'] != 'SOAR']
+                    if os.path.exists(csv_path):
+                        df_saved = pd.read_csv(csv_path)
+                        if "Metric correlation w/Slowdown within each benchmark" in df_saved.columns:
+                            df_saved = df_saved.rename(columns={"Metric correlation w/Slowdown within each benchmark": "Correlation"})
+                        soar_baseline = df_saved[df_saved['Metric'] == 'SOAR'].copy()
+                        soar_baseline['Metric'] = 'SOAR'
+                        
+                        unique_bids = pd.DataFrame({'bid': df['bid'].unique()})
+                        soar_joined = pd.merge(unique_bids, soar_baseline, on='bid', how='left')
+                        
+                        missing_bids = soar_joined[soar_joined[corrLabel].isna()]['bid'].tolist()
+                        if missing_bids:
+                            missing_names = [benchname[int(b)] if str(b).isdigit() else b for b in missing_bids]
+                            print("Benchmarks missing SOAR baseline:", missing_names)
+                            
+                        soar_joined[corrLabel] = soar_joined[corrLabel].fillna(-10)
+                        soar_joined['Metric'] = 'SOAR'
+                        
+                        df = pd.concat([df, soar_joined], ignore_index=True)
 
+                df['Metric'] = pd.Categorical(df['Metric'], categories=desired_order, ordered=True)
+                df['bid'] = pd.Categorical(df['bid'])
+                return df.sort_values(by=['bid', 'Metric']).dropna(subset=['Metric'])
+
+            def compress_corr_x(values):
+                values = np.asarray(values, dtype=float)
+                return np.where(values < 0, values / 4.0, values)
+
+            def draw_axis(ax, df, corr_mode, show_y=True):
+                row_debug_lines = []
+                for b in df['bid'].dropna().unique():
+                    df_b = df[df['bid'] == b]
+                    df_b = df_b[df_b[corrLabel] != -10]
+                    if df_b.empty:
+                        continue
+                    b_idx = int(b) if str(b).isdigit() else b
+                    try:
+                        color = get_color_bin(benchname[b_idx])
+                    except Exception:
+                        color = get_color_bin(b)
+                    ax.plot(compress_corr_x(df_b[corrLabel].values), df_b['Metric'].values,
+                            marker='o', markersize=2.2, linewidth=0.9, alpha=0.85, color=color)
+                    
+                    for _, row in df_b.iterrows():
+                        line = f"{corr_mode} {'!!!' if row[corrLabel] < 0 else '_'} {row['Metric']} {row[corrLabel]} {benchname[b_idx]} RATIO w/loads {row.get('how_many_more', 0)} RATIO OF ALL {row.get('how_much_of_al', 0)} RATIO OVER {row.get('how_much_overr', 0)} bench line {benchnrrr[b_idx]} {b_idx}"
+                        print(line)
+                        row_debug_lines.append(line)
+
+                ax.axvline(0, color='0.55', linewidth=0.6, zorder=0)
+                ax.grid(axis='x', alpha=0.18, linewidth=0.5)
+                ax.set_xlim(-0.25, 1.0)
+                ticks = [-1, -0.5, 0, 0.5, 1]
+                ax.set_xticks(compress_corr_x(ticks))
+                ax.set_xticklabels([str(t) for t in ticks])
+                ax.set_xlabel('Correlation')
+                ax.set_title(title_map[corr_mode])
+                if show_y:
+                    ax.set_ylabel('Metric')
+                else:
+                    ax.tick_params(axis='y', labelleft=False)
+                    ax.set_ylabel('')
+                return row_debug_lines
+
+            prepared = {m: prepare_df(m) for m in corr_modes}
+            for mode_name, df in prepared.items():
+                print(mode_name, df)
+
+            if len(corr_modes) == 1:
+                fig, ax = plt.subplots(figsize=(3.45, 2.35))
+                row_debug_lines = draw_axis(ax, prepared[corr_modes[0]], corr_modes[0])
+                f = "./__correlation_NEWwithin_outside.pdf"
+            else:
+                fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.35), sharey=True)
+                row_debug_lines = []
+                row_debug_lines.extend(draw_axis(axes[0], prepared["slowdown"], "slowdown", show_y=True))
+                row_debug_lines.extend(draw_axis(axes[1], prepared["llc"], "llc", show_y=False))
+                fig.subplots_adjust(wspace=0.08)
+                f = "./__correlation_NEWwithin_outside_both.pdf"
 
             with open("__row_debug.txt", "w") as _f:
-                _f.write("\n".join(_row_debug_lines) + "\n")
+                _f.write("\n".join(row_debug_lines) + "\n")
 
-            # 45 deg ticks
-            # plt.xticks(rotation=45, ha='right')
-            plt.xlabel('Correlation')
-            plt.ylabel('Metric')
-
-            corrLabel =  "Metric correlation w/Slowdown within each benchmark"
-            plt.title(corrLabel)
-            if modi == "SPEARSTO":
-                plt.title("Rank correlation of metrics w/LLC miss count")
-
-
-            # beeswarm (swarm plot): k is category, value is numeric point
-            """
-            df.plot(
-                
-                   kind='line',
-    marker='o',
-    markersize=8,
-    legend=True
-            )
-            
-            sns.lineplot(data=df,
-                             dashes=False,
-                             markers=True,
-                             markersize=8)
-            .swarmplot(
-                data=df,
-                x="Metric",          # categorical axis (k)
-                y="Correlation w/Slowdown",      # point value (_)
-                hue=df['Bench'],
-                size=4
-            )
-            """
-
-
-                
-            # X axis is overall correlation
-            # Y axis is moment by moment correlation
-            
-            #plt.xlabel("Slowdown (%)")
-            #plt.ylabel("Correlation")
-            plt.legend() # Global corr (all together) versus  individual... <-- there is higher correlation when all are considered, given that within each bench everything is the same pretty much
-            f = "./__correlation_NEWwithin_outside.pdf"
-            plt.tight_layout()
-            plt.savefig(f, bbox_inches='tight')
+            fig.tight_layout(pad=0.25)
+            fig.savefig(f, bbox_inches='tight')
+            plt.close(fig)
             print("Saved fig to ",f)
             
             # Standalone Legend Generation
@@ -12276,10 +12359,11 @@ np.array(all_together['commitedL3Misses']), all_together
                 mpatches.Patch(color='purple', label='NPB'),
                 mpatches.Patch(color='grey', label='Others')
             ]
-            fig_leg = plt.figure(figsize=(6, 1))
+            fig_leg = plt.figure(figsize=(3.8, 0.35))
             ax_leg = fig_leg.add_subplot(111)
             ax_leg.axis('off')
-            ax_leg.legend(handles=handles, loc='center', ncol=4, frameon=False, fontsize=14)
+            ax_leg.legend(handles=handles, loc='center', ncol=4, frameon=False, fontsize=7,
+                          handlelength=1.0, columnspacing=0.8)
             fig_leg.savefig('./__correlation_legend_standalone.pdf', bbox_inches='tight')
             plt.close(fig_leg)
             print("Saved standalone legend to ./__correlation_legend_standalone.pdf")
@@ -14529,7 +14613,3 @@ print(len(data.keys()))
 
 
 combine_plots('j')
-
-
-
-
