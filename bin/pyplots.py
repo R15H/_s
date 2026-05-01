@@ -1,5 +1,7 @@
 import os
 import re
+import time
+import datetime
 from dataclasses import dataclass, field
 from typing import Optional
 import numpy as np
@@ -7,7 +9,16 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 
+ROTATION=10
 METRICS = ["promotions", "demotions", "stalls", "access_ratio", "time"]
+
+METRIC_LABELS: dict[str, str] = {
+    "promotions":   "Page Promotions",
+    "demotions":    "Page Demotions",
+    "stalls":       "LLC Memory Stalls",
+    "access_ratio": "Hit Ratio",
+    "time":         "Thread Blocked Time",
+}
 
 
 @dataclass
@@ -20,14 +31,47 @@ class BenchmarkConfig:
 
 # Registry: benchmark identifier (as it appears in all_results) → config.
 BENCHMARK_CONFIGS: dict[str, BenchmarkConfig] = {
-    "bcuuu": BenchmarkConfig(
-        display_name="BCU (Block Compression Unit)",
-        dram_configs=[1, 2, 4, 8],
+    "bcu": 
+    BenchmarkConfig(
+        display_name="GAPBS - Betweeness Centrality",
+        #dram_configs=[1, 2, 4, 8],
+    ),
+    'cg': BenchmarkConfig(
+        display_name="NPB - CG.D ",
+        #dram_configs=[1, 2, 4, 8],
+    ),
+    'mg': BenchmarkConfig(
+        display_name="NPB - MG.C",
+        #dram_configs=[1, 2, 4, 8],
     ),
 }
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _parse_since(since) -> float:
+    """Return a Unix timestamp cutoff from a human-readable spec.
+
+    Accepted forms:
+      "today"        – midnight of the current local day
+      "Nd"           – N days ago  (e.g. "2d")
+      "Nh"           – N hours ago (e.g. "6h")
+      int / float    – if >= 1_000_000_000, treated as an absolute Unix timestamp;
+                       otherwise treated as a seconds-ago offset
+    """
+    now = time.time()
+    if since == "today":
+        d = datetime.date.today()
+        return datetime.datetime(d.year, d.month, d.day).timestamp()
+    if isinstance(since, (int, float)):
+        # Large values look like absolute timestamps (year >= 2001); small values are offsets.
+        return float(since) if since >= 1_000_000_000 else now - since
+    m = re.match(r"^(\d+(?:\.\d+)?)(d|h)$", str(since))
+    if m:
+        value, unit = float(m.group(1)), m.group(2)
+        return now - value * (86400 if unit == "d" else 3600)
+    raise ValueError(f"Unrecognised since spec: {since!r}  (use 'today', 'Nd', 'Nh', or a Unix timestamp)")
+
 
 def _normalize_base(base_str: str) -> str:
     """Collapse repeated trailing number segments: FOO-299-299-299 → FOO-299."""
@@ -86,7 +130,7 @@ def _compute_ratios(df: pd.DataFrame) -> pd.DataFrame:
 
 
 
-def load_and_join_metrico(benchmark=None, n_recent=None):
+def load_and_join_metrico(benchmark=None, n_recent=None, since=None):
     """
     Reads super_desired and all_results, joining on:
       super_desired['BASE'] (col 0) == all_results[col 4]
@@ -95,6 +139,8 @@ def load_and_join_metrico(benchmark=None, n_recent=None):
     benchmark : if given, keep only rows where the last column (ar_col6) equals this value.
     n_recent  : if given, after the benchmark filter keep only the N rows with the
                 highest ar_col5 (run timestamp).
+    since     : if given, discard rows whose runID (Unix timestamp) is older than this.
+                Accepted: "today", "Nd" (days), "Nh" (hours), or a seconds-ago int/float.
     """
     SUPER_DESIRED_PATH = "/mnt/nas/inesc/ist196723/osdi26/super_desired"
     ALL_RESULTS_PATH   = "/mnt/nas/inesc/ist196723/all_results"
@@ -167,6 +213,11 @@ def load_and_join_metrico(benchmark=None, n_recent=None):
         df_all = df_all[df_all["benchmark"] == benchmark]
         print(f"[load] after benchmark filter ({benchmark!r}): {len(df_all)} rows")
 
+    if since is not None:
+        cutoff = _parse_since(since)
+        df_all = df_all[df_all["runID"] >= cutoff]
+        print(f"[load] after since={since!r} (cutoff={cutoff:.0f}): {len(df_all)} rows")
+
     if n_recent is not None:
         df_all = df_all.nlargest(n_recent, "runID")
         print(f"[load] after n_recent={n_recent}: {len(df_all)} rows")
@@ -203,6 +254,92 @@ def _apply_benchmark_config(ratio_df: pd.DataFrame) -> pd.DataFrame:
         frames.append(group)
 
     return pd.concat(frames, ignore_index=True) if frames else ratio_df.iloc[0:0]
+
+
+def _plot_benchmark_group(ratio_df: pd.DataFrame,
+                          benchmarks: list[str],
+                          bar_col: str,
+                          filename: str,
+                          output_dir: str = ".",
+                          title: str = "Latency-Awareness Impact on Tiering Behaviour") -> str | None:
+    """
+    Creates a single figure with one subplot per benchmark in `benchmarks`.
+    Each subplot mirrors a plot_by_benchmark panel: X=metrics, Y=ratio, bars=bar_col.
+    Returns the saved file path, or None if no data.
+    """
+    n = len(benchmarks)
+    if n == 0:
+        return None
+
+    cols = min(n, 3)
+    rows = (n + cols - 1) // cols
+    # sharey so magnitudes are visually comparable across benchmarks
+    fig, axes = plt.subplots(rows, cols,
+                             figsize=(max(8, len(METRICS) * 1.8) * cols, 5 * rows),
+                             squeeze=False, sharey=True)
+    fig.subplots_adjust(top=0.88)
+    fig.suptitle(title, fontsize=15, fontweight="bold")
+    colors = plt.colormaps["Set2"].colors  # colorblind-safe
+    x = np.arange(len(METRICS))
+    x_labels = [METRIC_LABELS.get(m, m) for m in METRICS]
+    any_data = False
+
+    for idx, bench in enumerate(benchmarks):
+        ax = axes[idx // cols][idx % cols]
+        subset = ratio_df[ratio_df["benchmark"] == bench]
+        if subset.empty:
+            ax.set_title(f"{bench}\n(no data)", fontsize=12)
+            ax.axis("off")
+            continue
+
+        any_data = True
+        bar_vals = sorted(subset[bar_col].dropna().unique())
+        n_bars = len(bar_vals)
+        width = 0.75 / max(n_bars, 1)
+
+        for i, bar_val in enumerate(bar_vals):
+            row = subset[subset[bar_col] == bar_val]
+            ratios = [
+                float(row[f"ratio_{m}"].iloc[0])
+                if len(row) > 0 and not pd.isna(row[f"ratio_{m}"].iloc[0])
+                else np.nan
+                for m in METRICS
+            ]
+            offset = (i - n_bars / 2 + 0.5) * width
+            ax.bar(x + offset, ratios, width,
+                   label=f"{bar_val} MB",
+                   color=colors[i % len(colors)],
+                   edgecolor="white", linewidth=0.6)
+
+        ax.axhline(1.0, color="black", linestyle="--", linewidth=1.1, alpha=0.75)
+        ax.set_xticks(x)
+        ax.set_xticklabels(x_labels, rotation=ROTATION, ha="right", fontsize=10)
+        if idx % cols == 0:
+            ax.set_ylabel("Performance Ratio (ASMEM / MEMTIS)", fontsize=11)
+        ax.set_title(bench, fontsize=12, fontweight="bold")
+        ax.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.2f×"))
+        ax.legend(title="DRAM Size", loc="best", fontsize=9, title_fontsize=10)
+        ax.grid(axis="y", alpha=0.3, linestyle=":")
+        ax.set_axisbelow(True)
+
+    # Hide unused subplot slots
+    for idx in range(n, rows * cols):
+        axes[idx // cols][idx % cols].axis("off")
+
+    if not any_data:
+        print(f"[SKIP] benchmark group {benchmarks}: no data")
+        plt.close(fig)
+        return None
+
+    plt.tight_layout()
+    base_path = os.path.join(output_dir, filename)
+    for ext, dpi in [(".pdf", None), (".png", 300)]:
+        path = base_path if base_path.endswith(ext) else os.path.splitext(base_path)[0] + ext
+        fig.savefig(path, dpi=dpi, bbox_inches="tight")
+        print("Saved to", path)
+    plt.show()
+    plt.close(fig)
+    return base_path
 
 
 def _plot_set(ratio_df: pd.DataFrame,
@@ -255,10 +392,10 @@ def _plot_set(ratio_df: pd.DataFrame,
 
         # Reference line: ratio = 1 means both systems are equal
         ax.axhline(1.0, color="black", linestyle="--", linewidth=1.1,
-                   alpha=0.75, label="ratio = 1  (asmem ≡ memtis)")
+                   alpha=0.75)
 
         ax.set_xticks(x)
-        ax.set_xticklabels(METRICS, rotation=20, ha="right", fontsize=10)
+        ax.set_xticklabels(METRICS, rotation=ROTATION, ha="right", fontsize=10)
         ax.set_ylabel("asmem / memtis  (ratio)", fontsize=11)
         ax.set_title(f"{title_prefix}: {facet}", fontsize=13, fontweight="bold")
         ax.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.2fx"))
@@ -280,8 +417,8 @@ def _plot_set(ratio_df: pd.DataFrame,
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
-def plot_reality_show(benchmark=None, n_recent=None):
-    df = load_and_join_metrico(benchmark=benchmark, n_recent=n_recent)
+def plot_reality_show(benchmark=None, n_recent=None, since=None, benchmark_groups=None):
+    df = load_and_join_metrico(benchmark=benchmark, n_recent=n_recent, since=since)
 
     # ── Parse system, config type, and DRAM config from BASE ──────────────────
     df["system"]      = df["BASE"].apply(_extract_system)
@@ -337,9 +474,28 @@ def plot_reality_show(benchmark=None, n_recent=None):
             output_dir=out_dir,
         )
 
+        if benchmark_groups:
+            for group in benchmark_groups:
+                safe = "_".join(re.sub(r"[^\w\-]", "_", b) for b in group)
+                fname = f"group_{safe}.png"
+                result = _plot_benchmark_group(
+                    ratio_df,
+                    benchmarks=group,
+                    bar_col="dram_config",
+                    filename=fname,
+                    output_dir=out_dir,
+                )
+                if result:
+                    all_created.append(result)
+
     print(f"\n{'─'*60}")
     print(f"Created {len(all_created)} file(s):")
     for f in all_created:
         print(f"  {f}")
 
-plot_reality_show()
+#plot_reality_show( # benchmark_groups=[["cg.D", "mg.C", "bcuuu"]],)
+
+plot_reality_show(
+    since=1777248000,  # absolute Unix timestamp – yesterday 2026-04-27 00:00:00 UTC
+    benchmark_groups=[["1bfsk", "1bfsu", "bcu"]],
+)

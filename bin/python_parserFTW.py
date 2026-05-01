@@ -8,6 +8,55 @@ import matplotlib.pyplot as plt
 import sys
 modi=""
 
+import atexit as _atexit
+import os as _os
+_created_files = []
+_opened_files = []
+_builtin_open = open
+def open(*args, **kwargs):
+    mode = kwargs.get("mode", args[1] if len(args) > 1 else "r")
+    result = _builtin_open(*args, **kwargs)
+    path = _os.path.abspath(str(args[0]))
+    if any(m in mode for m in ("w", "a", "x")):
+        if path not in _created_files:
+            _created_files.append(path)
+    else:
+        if path not in _opened_files:
+            _opened_files.append(path)
+    return result
+_orig_savefig = plt.savefig
+def _tracked_savefig(fname, *args, **kwargs):
+    path = _os.path.abspath(str(fname))
+    if path not in _created_files:
+        _created_files.append(path)
+    return _orig_savefig(fname, *args, **kwargs)
+plt.savefig = _tracked_savefig
+def _print_file_tree(files):
+    from collections import defaultdict
+    by_dir = defaultdict(list)
+    for f in files:
+        by_dir[_os.path.dirname(f)].append(_os.path.basename(f))
+    dirs = sorted(by_dir)
+    common = _os.path.commonpath(dirs) if len(dirs) > 1 else dirs[0]
+    for d in dirs:
+        names = by_dir[d]
+        rel = _os.path.relpath(d, common)
+        depth = 0 if rel == "." else len(rel.split(_os.sep))
+        indent = "  " * depth
+        first_full = _os.path.join(d, names[0])
+        rest = ("  " + "  ".join(names[1:])) if len(names) > 1 else ""
+        print(f"  {indent}{first_full}{rest}")
+@_atexit.register
+def _print_created_files():
+    if _opened_files:
+        print("\n=== Files opened ===")
+        _print_file_tree(_opened_files)
+    if _created_files:
+        print("\n=== Files created ===")
+        for f in _created_files:
+            print(" ", f)
+        print("=====================")
+
 from scipy import stats
 
 import matplotlib.lines as mlines
@@ -96,6 +145,93 @@ def load_count_data(filepath):
         print("FAILED TO LOAD", filepath)
         return np.ones(array_lengths)
 
+def plot_stall_vs_llc_corr(row_file="__row_debug.txt", corr_file="__corr_bench_debug.txt", show_filename=False):
+    import re
+
+    def _parse(path):
+        records = []
+        try:
+            fh = _builtin_open(path)
+        except FileNotFoundError:
+            print(f"[plot_stall_vs_llc_corr] file not found: {path}")
+            return records
+        with fh:
+            for line in fh:
+                if "MLP" not in line and "Stall" not in line:
+                    continue
+                line = line.strip()
+                if not line or line[0] not in ('!', '_'):
+                    continue
+                # unified regex: Spearman group is optional
+                m = re.search(
+                    r' RATIO w/loads \S+ RATIO OF ALL \S+ RATIO OVER \S+'
+                    r'(?:\s+Spearman LLC/Stall \S+)?\s+bench line (\S+) (\S+)$', line)
+                if not m: continue
+                bench_line, idx = m.group(1), m.group(2)
+                # line format: FLAG METRIC... CORRVAL BENCH RATIO...
+                # correlation is the first number in the line
+                prefix = line[:m.start()].split()
+                flag = prefix[0]
+                rest = prefix[1:]
+                corr_idx = next((i for i, t in enumerate(rest)
+                                 if re.match(r'-?[\d.]+(?:[eE][+-]?\d+)?$', t)), None)
+                if corr_idx is None:
+                    continue
+                corr = float(rest[corr_idx])
+                metric = ' '.join(rest[:corr_idx])
+                bench  = ' '.join(rest[corr_idx + 1:])
+                records.append({'flag': flag, 'metric': metric, 'corr': corr,
+                                'bench': bench, 'bench_line': bench_line, 'idx': idx})
+        return records
+
+    row_recs  = _parse(row_file)
+    corr_recs = _parse(corr_file)
+
+    # index by (idx, metric); row_recs overwrite corr_recs on collision
+    by_idx_metric = {}
+    for r in corr_recs + row_recs:
+        by_idx_metric[(r['idx'], r['metric'])] = r
+
+    stall_metric = "Stall Cycles/MLP"
+    llc_metric   = "LLC miss count"
+
+    xs, ys, labels = [], [], []
+    for idx in sorted({k[0] for k in by_idx_metric}):
+        stall = by_idx_metric.get((idx, stall_metric))
+        llc   = by_idx_metric.get((idx, llc_metric))
+        if stall is None or llc is None:
+            continue
+        xs.append(llc['corr'])
+        ys.append(stall['corr'])
+        label = f"id={idx}  line={stall['bench_line']}"
+        if show_filename:
+            label = f"{stall['bench']}  {label}"
+        labels.append(label)
+
+    if not xs:
+        print("[plot_stall_vs_llc_corr] no matched data for both metrics")
+        return
+
+    fig, ax = plt.subplots(figsize=(9, 7))
+    ax.scatter(xs, ys, zorder=3)
+    for x, y, lbl in zip(xs, ys, labels):
+        ax.annotate(lbl, (x, y), fontsize=7,
+                    textcoords="offset points", xytext=(4, 4))
+    lo = min(xs + ys) - 0.05
+    hi = max(xs + ys) + 0.05
+    ax.plot([lo, hi], [lo, hi], '--', color='gray', linewidth=1, label='y = x')
+    ax.set_xlim(lo, hi)
+    ax.set_ylim(lo, hi)
+    ax.set_xlabel("Correlation: LLC miss count vs Slowdown")
+    ax.set_ylabel("Correlation: Stall Cycles/MLP vs Slowdown")
+    ax.set_title("Per-bench: Stall Cycles/MLP vs LLC miss count — correlation with slowdown")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    f = "./__stall_vs_llc_corr.pdf"
+    fig.savefig(f, bbox_inches='tight')
+    print("Saved", f)
+    plt.close(fig)
 
 
 
@@ -1447,6 +1583,139 @@ def scatter_combined_access_stalls_mlp(shared_legend=False):
     fig.suptitle("Benchmark Characterization with AsMem")
 
     out = f"{FIGS_FOLDER}/_mu_inst/AAAAcombined_bc_mgC_cgD_scatter.pdf"
+    print("saved", out)
+    plt.savefig(out, bbox_inches='tight')
+    plt.close()
+
+
+def scatter_only_bc_mgC_cgD(paper=False):
+    folder = "/mnt/nas/inesc/ist196723/osdi26/final_data/_mu_inst/"
+    targets = {
+        "benches_final-bc0-2":      "GAPBS - Betweenness Centrality",
+        "bu-mg.C":                  "NPB - mg.C",
+        "npb_result-iter-cg.D0-6":  "NPB - cg.D",
+    }
+
+    if paper:
+        figsize = (5.5, 1.8)
+        fs_base, fs_title, fs_suptitle = 6, 6, 7
+        marker_size = 3
+    else:
+        figsize = (15, 4.5)
+        fs_base, fs_title, fs_suptitle = 10, 10, 16
+        marker_size = 10
+
+    datasets = {}
+    for fname, label in targets.items():
+        d = {'Access time': [], 'Stall Cycles': [], 'Stall Cycles/MLP': []}
+        with open(folder + fname, 'r') as fh:
+            for line in fh.readlines()[1:]:
+                v = line.split(" ")
+                v += [0] * 4
+                if int(v[1]) == 0:
+                    continue
+                d['Access time'].append(int(v[1]))
+                d['Stall Cycles'].append(int(v[2]))
+                if "mg" in fname:
+                    d['Stall Cycles/MLP'].append(int(v[3]))
+                else:
+                    d['Stall Cycles/MLP'].append(int(v[4]))
+        datasets[label] = d
+
+    all_mlp = [x for d in datasets.values() for x in d['Stall Cycles/MLP']]
+    norm = mcolors.LogNorm(vmin=max(1, min(x for x in all_mlp if x > 0)), vmax=200)
+    inferno_clipped = mcolors.LinearSegmentedColormap.from_list('inferno_clipped', plt.cm.inferno(np.linspace(0, 0.88, 256)))
+
+    fig, axes = plt.subplots(1, 3, figsize=figsize, constrained_layout=True)
+    sc = None
+    for col, (label, d) in enumerate(datasets.items()):
+        ax_sc = axes[col]
+        sc = ax_sc.scatter(
+            d['Access time'], d['Stall Cycles'],
+            c=d['Stall Cycles/MLP'],
+            norm=norm,
+            cmap=inferno_clipped,
+            alpha=0.6, s=marker_size
+        )
+        ax_sc.set_title(label, fontsize=fs_title)
+        ax_sc.set_xlabel("Access Time", fontsize=fs_base)
+        ax_sc.tick_params(labelsize=fs_base)
+        ax_sc.set_xlim(0, 500)
+        ax_sc.set_ylim(0, 550)
+        if col == 0:
+            ax_sc.set_ylabel("Stall Cycles", fontsize=fs_base)
+        if col == 0:
+            ax_sc.set_ylim(0, 800)
+            ax_sc.set_xlim(0, 800)
+
+    cbar = fig.colorbar(sc, ax=axes.tolist(), label="Stall Cycles/MLP", extend='max')
+    cbar.ax.tick_params(labelsize=fs_base)
+    cbar.set_label("Stall Cycles/MLP", fontsize=fs_base)
+    cbar_ticks = [10, 25, 50, 100, 200]
+    cbar.set_ticks(cbar_ticks)
+    cbar.set_ticklabels([str(t) for t in cbar_ticks])
+    fig.suptitle("Benchmark Instruction Characterization", fontsize=fs_suptitle)
+
+    suffix = "_paper" if paper else ""
+    out = f"{FIGS_FOLDER}/_mu_inst/AAAAscatter_only_bc_mgC_cgD{suffix}.pdf"
+    print("saved", out)
+    plt.savefig(out, bbox_inches='tight')
+    plt.close()
+
+
+def cdf_only_bc_mgC_cgD(paper=False):
+    folder = "/mnt/nas/inesc/ist196723/osdi26/final_data/_mu_inst/"
+    targets = {
+        "benches_final-bc0-2":      "GAPBS - Betweenness Centrality",
+        "bu-mg.C":                  "NPB - mg.C",
+        "npb_result-iter-cg.D0-6":  "NPB - cg.D",
+    }
+
+    if paper:
+        figsize = (5.5, 1.8)
+        fs_base, fs_title, fs_suptitle, fs_legend = 6, 6, 7, 5
+        lw = 0.8
+    else:
+        figsize = (15, 4.5)
+        fs_base, fs_title, fs_suptitle, fs_legend = 10, 10, 16, 8
+        lw = 1.5
+
+    datasets = {}
+    for fname, label in targets.items():
+        d = {'Access time': [], 'Stall Cycles': [], 'Stall Cycles/MLP': []}
+        with open(folder + fname, 'r') as fh:
+            for line in fh.readlines()[1:]:
+                v = line.split(" ")
+                v += [0] * 4
+                if int(v[1]) == 0:
+                    continue
+                d['Access time'].append(int(v[1]))
+                d['Stall Cycles'].append(int(v[2]))
+                if "mg" in fname:
+                    d['Stall Cycles/MLP'].append(int(v[3]))
+                else:
+                    d['Stall Cycles/MLP'].append(int(v[4]))
+        datasets[label] = d
+
+    cdf_keys = ['Stall Cycles', 'Access time', 'Stall Cycles/MLP']
+
+    fig, axes = plt.subplots(1, 3, figsize=figsize, constrained_layout=True)
+    for col, (label, d) in enumerate(datasets.items()):
+        ax_cdf = axes[col]
+        for key in cdf_keys:
+            sorted_data, cdf = get_cdf_array(np.array(d[key]))
+            ax_cdf.plot(sorted_data, cdf, label=key, linewidth=lw)
+        ax_cdf.set_title(label, fontsize=fs_title)
+        ax_cdf.set_xlabel("Metric", fontsize=fs_base)
+        ax_cdf.tick_params(labelsize=fs_base)
+        if col == 0:
+            ax_cdf.set_ylabel("CDF", fontsize=fs_base)
+        ax_cdf.legend(fontsize=fs_legend, loc='lower right')
+
+    fig.suptitle("Benchmark Instruction Characterization", fontsize=fs_suptitle)
+
+    suffix = "_paper" if paper else ""
+    out = f"{FIGS_FOLDER}/_mu_inst/AAAAcdf_only_bc_mgC_cgD{suffix}.pdf"
     print("saved", out)
     plt.savefig(out, bbox_inches='tight')
     plt.close()
@@ -3722,6 +3991,8 @@ def plot_synthethic():
 
 from enum import IntEnum
 
+_WEIGHT_EIGHTY_OFFSET = 18  # simple_weight writes 18 fields (16 base + 2 derived) before the eighty block
+
 class WEIGHT_FIELD(IntEnum):
     ADDR = 0
     TOTAL_TIME = 1
@@ -3742,16 +4013,15 @@ class WEIGHT_FIELD(IntEnum):
     # positions 16-17: two derived fields appended by simple_weight after the 16 base fields
     BMW_METRIC_FREQ = 16
     MLP_BY_MEAN_FREQ = 17
-    # positions 18+: 80th-percentile run (same layout, offset=18)
-
-    _EIGHTY_OFFSET = 18  # simple_weight writes 18 fields before the eighty block
+    # positions 18+: 80th-percentile run (same 18-field layout, offset=18)
 
     @classmethod
     def get_name(cls, idx: int) -> str:
         base_field = next((member for member in cls if member.value == idx), None)
         if base_field is not None:
             return base_field.name
-        base_field = next((member for member in cls if member.value + cls._EIGHTY_OFFSET == idx), None)
+        # 80th-percentile block starts after the 18 base+derived fields
+        base_field = next((member for member in cls if member.value + _WEIGHT_EIGHTY_OFFSET == idx), None)
         if base_field is None:
             return "UNKNOWN MAN..."
         return base_field.name + "80"
@@ -3764,7 +4034,7 @@ class WEIGHT_FIELD(IntEnum):
         Usage: parts[RecordField.get_position("TOTAL_TIME", 1)]
         """
         field = cls[field_name]
-        return field.value + (type_idx * cls._EIGHTY_OFFSET)
+        return field.value + (type_idx * _WEIGHT_EIGHTY_OFFSET)
 
 
 """
@@ -3887,10 +4157,57 @@ then, you need to get the CPU time used by each of the rows using the 6th row. t
 """
 
 
+def load_and_join_metrico():
+    """
+    Reads super_desired and all_results, joining on:
+      super_desired['BASE'] (col 0) == all_results[col 4]
+    Returns a merged DataFrame.
+    """
+    SUPER_DESIRED_PATH = "/mnt/nas/inesc/ist196723/osdi26/super_desired"
+    ALL_RESULTS_PATH   = "/mnt/nas/inesc/ist196723/all_results"
+
+    # --- Load super_desired ---
+    super_desired_cols = ["BASE", "runID", "promotions", "demotions",
+                          "stalls", "access_ratio", "time"]
+    df_super = pd.read_csv(
+        SUPER_DESIRED_PATH,
+        sep=r"\s+",          # whitespace-separated (space-delimited echo output)
+        header=None,
+        names=super_desired_cols
+    )
+
+    # --- Load all_results ---
+    # Column names are unknown; load generically and name col 4 explicitly
+    df_all = pd.read_csv(
+        ALL_RESULTS_PATH,
+        sep=r"\s+",
+        header=None
+    )
+    df_all.columns = [f"ar_col{i}" for i in range(len(df_all.columns))]
+    df_all = df_all.rename(columns={"ar_col4": "BASE"})  # join key alias
+
+    # --- Join on BASE (super_desired col 0) == all_results col 4 ---
+    merged = pd.merge(
+        df_super,
+        df_all,
+        on="BASE",
+        how="inner"          # change to "left" / "outer" as needed
+    )
+
+    return merged
+
+def plot_reality_show():
+    df = load_and_join_metrico()
+    
+
 
 """
 python3 bin/python_parser.py "simple_weight()"
 """
+
+
+
+
 writes=0
 def psw___(): # plot syntehthic weights 
     RESULT_FOLDER="/mnt/nas/inesc/ist196723/osdi26/final_data/multiIII100/synthethic_extended-*-*"
@@ -4168,16 +4485,31 @@ def psw_line___():
     for f in glob.glob(RESULT_FOLDER):
         arand = int(f.split("extended-")[1].split("-")[0])
         aptr  = int(f.split("extended-")[1].split("-")[1])
+        isEightyWeights = "_80"  in f 
+        if False:
+            if isEightyWeights: 
+                print(arand, aptr, 'darm'); continue 
+            else: 
+                print(arand, aptr, 'darmmmm'); continue
         fh = open(f, 'r'); lines = fh.readlines(); fh.close()
         for l in lines:
             if not l.startswith(str(aptr_inst)) and not l.startswith(str(arand_inst)):
                 continue
-            row = {'aptr': aptr, 'arand': arand}
+            row = {'aptr': aptr, 'arand': arand, '_src_file': f}
             for i, entry in enumerate(l.split(" ")):
                 if entry in ("\n", ''):
                     continue
-                row[WEIGHT_FIELD.get_name(i)] = int(entry)
+                field_name = WEIGHT_FIELD.get_name(i)
+                row[field_name + ("80" if isEightyWeights else "")] = int(entry)
+                if isEightyWeights and field_name == "ADDR":
+                    row["ADDR"] = int(entry)  # needed for filtering below
             df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+
+    # Collapse non-80 and 80 rows that share (arand, aptr, ADDR) into one row.
+    # groupby.first() skips NaN, so each column picks up its value from whichever
+    # source file had it set.
+    non_key = [c for c in df.columns if c not in ("arand", "aptr", "ADDR")]
+    df = df.groupby(["arand", "aptr", "ADDR"], as_index=False)[non_key].first()
 
     df = df.sort_values(by="arand")
     print(f"[psw_line] total rows loaded: {len(df)}  (ptr rows: {(df['ADDR']==aptr_inst).sum()}, str rows: {(df['ADDR']==arand_inst).sum()})")
@@ -4188,7 +4520,7 @@ def psw_line___():
     df_merged = df_merged.sort_values("arand")
     print(f"[psw_line] merged rows: {len(df_merged)},  arand range: {df_merged['arand'].min()}–{df_merged['arand'].max()}")
 
-    FIELDSSS = ["AVG_INST_COST_160", "TOTAL_TIME", "STALL_TIME"]
+    FIELDSSS = ["TOTAL_TIME", "STALL_TIME", "MLP_BY_MEAN"]
     weight_colors = ['blue', 'orange', 'purple']
     weight_labels = ['Access Time', 'Stall Time', 'Stall Time / MLP']
 
@@ -4197,6 +4529,18 @@ def psw_line___():
         den = den.copy().astype(float)
         den[den.abs() < thresh] = float('nan')
         return num / den
+
+    FLAG_THRESH = 500
+    def flag_over(series, label, merged_df):
+        mask = series > FLAG_THRESH
+        if not mask.any():
+            return
+        bad = merged_df[mask][["arand", "aptr", "_src_file_ptr", "_src_file_str"]].copy()
+        bad[label] = series[mask].values
+        for _, r in bad.iterrows():
+            print(f"  FLAG {label}={r[label]:.1f}  arand={r['arand']}  aptr={r['aptr']}")
+            print(f"       src_ptr: {r['_src_file_ptr']}")
+            print(f"       src_str: {r['_src_file_str']}")
 
     plt.figure()
     for weight, color, label in zip(FIELDSSS, weight_colors, weight_labels):
@@ -4208,14 +4552,26 @@ def psw_line___():
         print(f"  ptr  min={ptr_vals.min():.1f}  max={ptr_vals.max():.1f}  mean={ptr_vals.mean():.1f}")
         print(f"  str  min={str_vals.min():.1f}  max={str_vals.max():.1f}  mean={str_vals.mean():.1f}")
         print(f"  ratio min={ratio.min():.3f}  max={ratio.max():.3f}  mean={ratio.mean():.3f}")
+        flag_over(ptr_vals, f"ptr({weight})", df_merged)
+        flag_over(str_vals, f"str({weight})", df_merged)
+        flag_over(ratio, f"ratio({weight})", df_merged)
         zero_den = (str_vals == 0).sum()
         if zero_den:
             print(f"  WARNING: {zero_den} rows with zero str denominator (skipped as NaN)")
         plt.plot(x, ratio, marker='o', color=color, label=label)
 
         if (weight + "80_ptr") in df_merged.columns and (weight + "80_str") in df_merged.columns:
-            delta_ptr = df_merged[weight + "80_ptr"] - df_merged[weight + "_ptr"]
-            delta_str = df_merged[weight + "80_str"] - df_merged[weight + "_str"]
+            ptr80_vals = df_merged[weight + "80_ptr"]
+            str80_vals = df_merged[weight + "80_str"]
+            ratio80 = safe_ratio(ptr80_vals, str80_vals)
+            print(f"  ptr80  min={ptr80_vals.min():.1f}  max={ptr80_vals.max():.1f}  mean={ptr80_vals.mean():.1f}")
+            print(f"  str80  min={str80_vals.min():.1f}  max={str80_vals.max():.1f}  mean={str80_vals.mean():.1f}")
+            print(f"  ratio80 min={ratio80.min():.3f}  max={ratio80.max():.3f}  mean={ratio80.mean():.3f}")
+            flag_over(ptr80_vals, f"ptr80({weight})", df_merged)
+            flag_over(str80_vals, f"str80({weight})", df_merged)
+            flag_over(ratio80, f"ratio80({weight})", df_merged)
+            delta_ptr = ptr80_vals - df_merged[weight + "_ptr"]
+            delta_str = str80_vals - df_merged[weight + "_str"]
             delta_ratio = safe_ratio(delta_ptr, delta_str, thresh=50.0)
             print(f"  delta_ptr min={delta_ptr.min():.1f}  max={delta_ptr.max():.1f}")
             print(f"  delta_str min={delta_str.min():.1f}  max={delta_str.max():.1f}")
@@ -4233,7 +4589,7 @@ def psw_line___():
     print("./good_weights_line.svg")
 
 
-def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignore_inst = True):
+def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignore_inst = True, EIGHT_MODE=False):
     global run_meta
     global DATA_FOLDER
     global RUN_DATA_FOLDER
@@ -4269,7 +4625,6 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
     processed_binaries = set()
     def simp(data,r):
         global writes
-        EIGHT_MODE=False
         this_binary = data[r]['0']['bench'].split("/")[-1]
         print(this_binary, "THI SBINARY")
         if MULTI and this_binary in processed_binaries:
@@ -4284,9 +4639,7 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
             
 
         if not ignore_inst:
-            i = load_inst_fields(data, r)
-            if EIGHT_MODE:
-                i = load_inst_fields(data, r, '80')   # i80 = ... instead of i = ... <--------- HOURS LOST !
+            i = load_inst_fields(data, r, '80' if EIGHT_MODE else '0')
         else:
             print(ignore_inst)
             print("BRUV")
@@ -4317,18 +4670,18 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
             print("DOES NOT HAVE AGG",e)
             a=True
         try:
-            load_inst_fields(data, r )['address']
+            load_inst_fields(data, r, '80' if EIGHT_MODE else '0')['address']
         except Exception as e :
             print("DOES NOT HAVE INST", e)
             b=True
         print("----")
-        if a:
-            if b:
-                print("No agg and no inst, skipping")
+        if b:
+                print("No inst, skipping")
                 return
+        if a:
             # Has inst but no agg — fake agg with -1 sentinel values so output columns stay intact
-            print("No agg, faking with -1 sentinel values")
-            _fake_addrs = np.unique(load_inst_fields(data, r)['address'])
+            print("agg, faking with -1 sentinel values")
+            _fake_addrs = np.unique(load_inst_fields(data, r, '80' if EIGHT_MODE else '0')['address'])
             _n = len(_fake_addrs)
             agg = {
                 'address':            _fake_addrs,
@@ -4339,7 +4692,8 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
                 'stallTime':          np.full(_n, -1, dtype=np.int64),
                 'lastStallTime':      np.full(_n, -1, dtype=np.int64),
             }
-        elif b and not ignore_inst:
+        if b and a:
+            #elif b and not ignore_inst and False:
             print("No inst data for this run, skipping")
             return
 
@@ -4347,7 +4701,7 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
         for k in agg_keys:
             agg[k] = agg[k]
 
-        if(len(load_inst_fields(data, r )['totalTime']) != len(load_inst_fields(data, r )['address']) ):
+        if(len(load_inst_fields(data, r, '80' if EIGHT_MODE else '0')['totalTime']) != len(load_inst_fields(data, r, '80' if EIGHT_MODE else '0')['address']) ):
                         print("big mistake!!")
                         return
             
@@ -4377,10 +4731,10 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
                     try:
                         if not ignore_inst:
                             for k in keys_used:
-                                if(len(load_inst_fields(data, ru)['totalTime']) != len(load_inst_fields(data, ru)['address'])):
+                                if(len(load_inst_fields(data, ru, '80' if EIGHT_MODE else '0')['totalTime']) != len(load_inst_fields(data, ru, '80' if EIGHT_MODE else '0')['address'])):
                                     print("big mistake!!")
                                     raise Exception("Bad binary...")
-                                load_inst_fields(data, ru)[k][SKIP_START:] # test that it works
+                                load_inst_fields(data, ru, '80' if EIGHT_MODE else '0')[k][SKIP_START:] # test that it works
                         for k in agg_keys:
                             load_aggregate_fields(data, ru)[k]
 
@@ -4392,7 +4746,7 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
                     for k in keys_used:
                         try:
 
-                            v =  np.concatenate((i[k], load_inst_fields(data, ru )[k][SKIP_START:]))
+                            v =  np.concatenate((i[k], load_inst_fields(data, ru, '80' if EIGHT_MODE else '0')[k][SKIP_START:]))
                             i[k] = v
                         except :
                             if not ignore_inst:
@@ -4473,6 +4827,7 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
                 """
                 sel = i['address'] == addr # & i['totalTime']  != 0
                 """
+                current_ignore_inst = False # ignore_inst
 
                 #print(aggi, "AGGI")
                 sanity.append(aggi)
@@ -4549,8 +4904,9 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
                 #j+=1
                 def toi(n):
                     return int(n if not np.isnan(n) else 0)
-                mlpWeighted = 0 if ignore_inst else toi(np.mean(i['stallCyclesMLPLoad'][sel])) # if not np.isnan(np.mean(i['stallCyclesMLPLoad'][sel])) else 0
-                freq = sel.sum() if not ignore_inst else inst_cost(4, lambda llc_misses,hidden_cost,n_llc_misses: n_llc_misses)  
+                current_ignore_inst = ignore_inst and False
+                mlpWeighted = 0 if current_ignore_inst else toi(np.mean(i['stallCyclesMLPLoad'][sel])) # if not np.isnan(np.mean(i['stallCyclesMLPLoad'][sel])) else 0
+                freq = sel.sum() if not current_ignore_inst else inst_cost(4, lambda llc_misses,hidden_cost,n_llc_misses: n_llc_misses)  
 
                 totTime = inst_cost(4, lambda llc_misses,hidden_cost,n_llc_misses: int(np.sum(aggi['totalTime'][llc_misses]/n_llc_misses)) )
                 if(totTime < 250):
@@ -4560,7 +4916,7 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
                 sTime = inst_cost(4, lambda llc_misses,hidden_cost,n_llc_misses: int(np.sum(aggi['stallTime'][llc_misses]/n_llc_misses)) )
                 mlpWeighted = inst_cost(4, lambda llc_misses,hidden_cost,n_llc_misses: int(np.sum(aggi['stallCyclesMLPLoad'][llc_misses]/n_llc_misses)) )
 
-                if not OLD_V4 and not ignore_inst:
+                if not OLD_V4 and not current_ignore_inst:
                     exit(0)
                     mlpWeighted /= 1024
                     mlp_by_mean = toi(np.mean(i['stallTime'][sel]/(i['average_mlp'][sel]+1)))
@@ -4576,9 +4932,13 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
                 # int(np.mean(i['average_mlp'][sel])), "--->", 
 
                 # IS BY AGG VERY DIFF THAN BY INST? 
+                LAST_FIX = False
+                if LAST_FIX:
+                    current_ignore_inst = False
+                    mlp_by_mean = toi(np.mean(i['stallTime'][sel]/(i['average_mlp'][sel]+1)))
 
-                totTime = totTime if ignore_inst else np.mean(i['totalTime'][sel])
-                sTime = sTime if ignore_inst else np.mean(i['stallTime'][sel])
+                totTime = totTime if current_ignore_inst else np.mean(i['totalTime'][sel])
+                sTime = sTime if current_ignore_inst else np.mean(i['stallTime'][sel])
                 #toi(totTime) + toi(sTime)  + toi(aggCost) + toi(aggStoreCost) + toi(mlpWeighted) +
                 bmw_metric = mlpWeightedAgg + aggStoreCost #aggCost 
                 relevant_costs =  toi(mlp_by_mean) + toi(mlpWeightedAgg) + toi(bmw_metric)
@@ -4623,16 +4983,16 @@ def simple_weight(MULTI=True,ONLY_SYN=False, TARGET_BIN=None,OLD_V4=False, ignor
             #slowdown = np.mean(load_global_fields(data, r, '80')['cycles'])*100/np.mean(load_global_fields(data, r, '0')['cycles'])
             agg80 = load_aggregate_fields(data, r, '80')  # was not passing the 80 here...
             #print(data[r]['80']['line'])
+            zero = None
             try:
                 zero = _proccess_inst(addr,agg)    
                 eighty = ""
-                """
                 try:
                     eighty = _proccess_inst(addr,agg80)    
                 except:
                     print("ERROR: 80 latency not available for this run..")
                     eighty = ""
-                """
+                #"""
             except Exception as e:    
                 print(e)
                 import traceback
@@ -11607,6 +11967,7 @@ np.array(all_together['commitedL3Misses']), all_together
     how_much_over = []
     spearman_llc_stall = []
     def per_bench_f():
+        _corr_debug_lines = []
         for i,b in enumerate(per_bench):
             p = per_bench[i]
             n = benchname[i].split("/")[-1] 
@@ -11635,7 +11996,7 @@ np.array(all_together['commitedL3Misses']), all_together
             """
             for k in key_map.keys():
                 def correlate_llc_count_slowdown_per_bench(k):
-                    print(k, k in p)
+                    _corr_debug_lines.append(f"{k} {k in p}")
                     if k not in p:
                         return
                     if BY_MOMENT:
@@ -11657,10 +12018,13 @@ np.array(all_together['commitedL3Misses']), all_together
                             _ = robust_regress(k,p)[1]
                             corres[k].append(_)
                             sane_cor.append(_ )
-                        except Exception as e: 
-                            print(e)   
+                            _corr_debug_lines.append(f"{'!!!' if _ < 0 else '_'} {key_map[k]} {_} {n} RATIO w/loads {how_many_more} RATIO OF ALL {how_much_of_al} RATIO OVER {how_much_overr} bench line {benchnrrr[i]} {i}")
+                        except Exception as e:
+                            print(e)
+                            _corr_debug_lines.append(str(e))
                             import traceback
                             print(traceback.print_exc())
+                            _corr_debug_lines.append(traceback.format_exc())
                             sane_cor.append(0)
                             corres[k].append(0)
                         corres_agg[k].append(np.sum(p[k])) # sum of the metric
@@ -11669,7 +12033,8 @@ np.array(all_together['commitedL3Misses']), all_together
                         benchcor.append(n)
                         benchcor_id.append(i)
                         benchnrcor.append(benchnrrr[i])
-                print(BY_MOMENT, "BY MOMENTOOOO")        
+                print(BY_MOMENT, "BY MOMENTOOOO")
+                _corr_debug_lines.append(f"{BY_MOMENT} BY MOMENTOOOO")
                 correlate_llc_count_slowdown_per_bench(k)
                 #continue
                 
@@ -11690,8 +12055,11 @@ np.array(all_together['commitedL3Misses']), all_together
                                 {'title': n + " - " + k, 'folder': f"PER_BENCH/{f}", 'sf' : n , 'size': 10, 'alfa': 1 , 'leg': False}, 
                                 KEY_PLOT=BY_MOMENT # there is no scatter to do if we are considering only one bench and only it at the workload level  
                                 )
-                    break  
+                    break
                 #break
+
+        with open("__corr_bench_debug.txt", "w") as _f:
+            _f.write("\n".join(_corr_debug_lines) + "\n")
 
         def plot_correlation_per_bench():
             #print("EXITO")
@@ -11768,6 +12136,7 @@ np.array(all_together['commitedL3Misses']), all_together
             df = df.sort_values(by=['bid', 'Metric']).dropna(subset=['Metric'])
 
             xk = 'bid'
+            _row_debug_lines = []
             for b in df[xk].dropna().unique():
                 df_b = df[df[xk] == b]
                 df_b = df_b[df_b[corrLabel] != -10]
@@ -11778,9 +12147,13 @@ np.array(all_together['commitedL3Misses']), all_together
                 plt.plot(df_b[corrLabel].values, df_b['Metric'].values, marker='o', markersize=8, color=color)
                 
                 for _, row in df_b.iterrows():
-                    print("!!!" if row[corrLabel] < 0 else "", row['Metric'], row[corrLabel], benchname[b_idx], "RATIO w/loads", ld_st_ratio[b_idx], "RATIO OF ALL", how_much_of_all[b_idx], "RATIO OVER", how_much_over[b_idx], "Spearman LLC/Stall", spearman_llc_stall[b_idx], "bench line", benchnrrr[b_idx], b_idx)
+                    print("!!!" if row[corrLabel] < 0 else "_", row['Metric'], row[corrLabel], benchname[b_idx], "RATIO w/loads", ld_st_ratio[b_idx], "RATIO OF ALL", how_much_of_all[b_idx], "RATIO OVER", how_much_over[b_idx], "Spearman LLC/Stall", spearman_llc_stall[b_idx], "bench line", benchnrrr[b_idx], b_idx)
+                    _row_debug_lines.append(f"{'!!!' if row[corrLabel] < 0 else '_'} {row['Metric']} {row[corrLabel]} {benchname[b_idx]} RATIO w/loads {ld_st_ratio[b_idx]} RATIO OF ALL {how_much_of_all[b_idx]} RATIO OVER {how_much_over[b_idx]} Spearman LLC/Stall {spearman_llc_stall[b_idx]} bench line {benchnrrr[b_idx]} {b_idx}")
                     #  44 ... <---
 
+
+            with open("__row_debug.txt", "w") as _f:
+                _f.write("\n".join(_row_debug_lines) + "\n")
 
             # 45 deg ticks
             # plt.xticks(rotation=45, ha='right')
@@ -14090,4 +14463,7 @@ print(len(data.keys()))
 
 
 combine_plots('j')
+
+
+
 

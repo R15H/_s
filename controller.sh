@@ -363,8 +363,8 @@ __core_synthethic_all(){
 
                         benchset="synthethic_extended-$arand-$aptr-"
                         ARGS="$args"; STDIN=""; WORKDIR="$WORKDIR"; # size=simsmall
-                        SKIP_SECONDS=40
-                        TIMEOUT_SECONDS=30 # 2 minutes 
+                        SKIP_SECONDS=80
+                        TIMEOUT_SECONDS=60 # 2 minutes 
                     _do_gem5_skip 
 
 }
