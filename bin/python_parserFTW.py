@@ -9053,6 +9053,7 @@ def is_miss_aligned(data,r):
 
 
 BY_MOMENT=False
+PAPER=False
 NORM = "user"
 INTENSITY_metric = None
 SKIP_REGRESS = False
@@ -9334,7 +9335,7 @@ def moment_metric():
     OTHER_X_KEYS = [SLOWP]
 
     #NORM = "NONE"
-    
+
     #OTHER_X_KEYS = [ABS]
 
     metric_eval()
@@ -9343,6 +9344,22 @@ def moment_metric():
     NORM = "NONE"
     metric_eval()
 
+    exit(0)
+
+def moment_metric_paper():
+    global NORM
+    global BY_MOMENT
+    global PAPER
+    global OTHER_X_KEYS
+    BY_MOMENT = True
+    PAPER = True
+    NORM = "user"
+    OTHER_X_KEYS = [SLOWP]
+    metric_eval()
+    BY_MOMENT = True
+    NORM = "NONE"
+    metric_eval()
+    PAPER = False
     exit(0)
 
 def erview():
@@ -11709,7 +11726,7 @@ np.array(all_together['commitedL3Misses']), all_together
                 plt.figure()
                 #plt.figure(figsize=(20,20))
             else:
-                plt.figure(figsize=(20,20))
+                plt.figure(figsize=(5.5, 4.5) if PAPER else (20, 20))
             
 
             #print(all_together[k])
@@ -11726,7 +11743,7 @@ np.array(all_together['commitedL3Misses']), all_together
             #all_together['global_slowdown']
             #plt.scatter(all_together['global_slowdown'], all_together[k], s=size, alpha=alfa , c=final_colors) 
             if BY_MOMENT or True:
-                fontSize = 35
+                fontSize = 7 if PAPER else 35
                 plt.rcParams.update({'font.size': fontSize,
                                     'axes.labelsize': fontSize,
                                     'axes.titlesize': fontSize,
@@ -11735,8 +11752,8 @@ np.array(all_together['commitedL3Misses']), all_together
                                     'legend.fontsize': fontSize,
                                     'figure.titlesize': fontSize})
 
-                plt.tick_params(axis='x', labelsize=30)
-                plt.tick_params(axis='y', labelsize=30)
+                plt.tick_params(axis='x', labelsize=6 if PAPER else 30)
+                plt.tick_params(axis='y', labelsize=6 if PAPER else 30)
             if '%' in x_key:
                 plt.ticklabel_format(axis='x', style='plain')
             plt_args= ( {'fontsize':fontSize} if BY_MOMENT else {})
@@ -11774,7 +11791,7 @@ np.array(all_together['commitedL3Misses']), all_together
             if 'title' in EXTRA:
                 plt.title(EXTRA['title'])
             plt.tight_layout()
-            save_fig(f'./_finos/fii/{folder}{"/LLC_ONLY_" if LLC_ONLY else ""}{sf}A__{"HOT_" if BY_HOT else ""}{"ERVIEW" if ERROR_VIEW else ""}{"BY_MOMENT" if BY_MOMENT else ""} {INTENSITY_metric if INTENSITY_metric else  ""} - {NORM} globos de ouroOO_OO_OO' + k.replace("/", "D") + " " + x_key.replace("/","D") + "_" + DATASET_S + '.pdf'.replace(" ", "_"))
+            save_fig(f'./_finos/fii/{folder}{"/LLC_ONLY_" if LLC_ONLY else ""}{sf}A__{"HOT_" if BY_HOT else ""}{"ERVIEW" if ERROR_VIEW else ""}{"BY_MOMENT" if BY_MOMENT else ""}{"_paper" if PAPER else ""} {INTENSITY_metric if INTENSITY_metric else  ""} - {NORM} globos de ouroOO_OO_OO' + k.replace("/", "D") + " " + x_key.replace("/","D") + "_" + DATASET_S + '.pdf'.replace(" ", "_"))
             print("Saved!")
             def hexa_plot():
                 plt.figure(figsize=(20,20))
