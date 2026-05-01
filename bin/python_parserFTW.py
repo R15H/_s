@@ -126,6 +126,14 @@ def get_color_bin(bin):
         if b in bin:
             return colors[i]
     return colors[-1]
+
+def get_suite_name(bin_path):
+    benchsets     = ["cpu2017", "gapbs", "NPB-CPP"]
+    benchsetsHUMAN = ["CPU2017", "GAPBS", "NPB"]
+    for i, b in enumerate(benchsets):
+        if b in bin_path:
+            return benchsetsHUMAN[i]
+    return "Others"
 def dr(d, k, value):
     if k not in d:
         d[k] = [value]
@@ -674,7 +682,12 @@ list(set(group_list) - set(["mode"])) ######### BE CAREFULL DOING A SET OF STRIN
 
     print(r)
     print(nrs, mode)
-    plt.figure(figsize=(14,6),dpi=600)
+    _fs = (3.33, 2.5) if PAPER else (14, 6)
+    _font = 7 if PAPER else 12
+    plt.figure(figsize=_fs, dpi=600)
+    plt.rcParams.update({'font.size': _font, 'axes.labelsize': _font,
+                         'axes.titlesize': _font, 'xtick.labelsize': _font,
+                         'ytick.labelsize': _font})
     idx = 0
     xticks = []
     xlabels = []
@@ -687,7 +700,7 @@ list(set(group_list) - set(["mode"])) ######### BE CAREFULL DOING A SET OF STRIN
             b = b.split("_")[0]
         nrs[b] = i
     """
-        
+
     print(np.unique(nrs))
     idxxx = []
     #exit(0)
@@ -757,15 +770,14 @@ list(set(group_list) - set(["mode"])) ######### BE CAREFULL DOING A SET OF STRIN
         print(xticks, xlabels)
         print(idxxx, np.diff(np.array(idxxx)))
 
-        #plt.tight_layout()
-        plt.subplots_adjust(bottom=0.25)
-
-        plt.title("Memory location impact on number of LLC misses observed in the real machine")
-                #Ratio of LLC misses in the real machine observed in the slow tier vs fast tier")
-        plt.xlabel("Benchmark")
-        plt.ylabel("LLC miss (%)")
-            
-        plt.xticks(xticks, xlabels, rotation=85, ha='center')
+        plt.title("Memory tier effect on detected LLC miss count", fontsize=_font)
+        plt.xlabel("Benchmark", fontsize=_font)
+        plt.ylabel("LLC miss (%)", fontsize=_font)
+        plt.xticks(xticks, xlabels, rotation=85, ha='center', fontsize=_font)
+        if PAPER:
+            plt.tight_layout()
+        else:
+            plt.subplots_adjust(bottom=0.25)
         plt.savefig("./_____STALL_QUALITY.png")
 
         # Set the legend properties
@@ -818,7 +830,12 @@ def plot_llc_change():
     print(np.array(count))
     print(r)
     print(nrs, mode)
-    plt.figure(figsize=(14,6),dpi=600)
+    _fs = (3.33, 2.5) if PAPER else (14, 6)
+    _font = 7 if PAPER else 12
+    plt.figure(figsize=_fs, dpi=600)
+    plt.rcParams.update({'font.size': _font, 'axes.labelsize': _font,
+                         'axes.titlesize': _font, 'xtick.labelsize': _font,
+                         'ytick.labelsize': _font})
     idx = 0
     xticks = []
     xlabels = []
@@ -831,11 +848,14 @@ def plot_llc_change():
             b = b.split("_")[0]
         nrs[b] = i
     """
-        
+
     print(np.unique(nrs))
     idxxx = []
+    suite_positions = {}  # suite_name -> [bar x positions]
     #exit(0)
-    for i in np.unique(nrs):    ################### WIDTH for loop that catches rejects and continues
+    _suite_order = {"NPB": 0, "CPU2017": 1, "GAPBS": 2, "Others": 3}
+    _sorted_nrs = sorted(np.unique(nrs), key=lambda x: _suite_order.get(get_suite_name(x), 99))
+    for i in _sorted_nrs:    ################### WIDTH for loop that catches rejects and continues
         rejects = ['small', 'trainI', 'sssp', "m64I"]
         if any(reject in i for reject in rejects):
             continue
@@ -860,10 +880,11 @@ def plot_llc_change():
         sub_bench = 0
         start_pos = idx +  sub_bench*(width_actual )
         gap = 0.2
-        
+        suite = get_suite_name(i)
+
         for n in np.unique(args[s]):
-            fast_llc = np.mean(count[f & (args == n)])  
-            slow_llc = np.mean(count[s & (args == n)]) 
+            fast_llc = np.mean(count[f & (args == n)])
+            slow_llc = np.mean(count[s & (args == n)])
             if not (np.sum([s & (args == n)]) > 2 and  np.sum([f & (args == n)]) > 2):
                 exit(0)
             ratio = slow_llc/fast_llc
@@ -872,19 +893,20 @@ def plot_llc_change():
             print("LABEL", b, slow_llc, fast_llc)
 
             idxxx.append(idx)
-        
+            suite_positions.setdefault(suite, []).append(idx)
+
             plt.bar(idx, ratio*FACTOR, width=width_actual,  label=b, color=get_color_bin(i))
             idx += gap
             sub_bench+=1
-            idx +=  ((width_actual ))  ### WAS SCALING THE SPACING IN FUNCTION OF NR OF BENCHES! BUT THE ADD ALREADY DOES THAT! 
+            idx +=  ((width_actual ))  ### WAS SCALING THE SPACING IN FUNCTION OF NR OF BENCHES! BUT THE ADD ALREADY DOES THAT!
 
         idx -= (gap + ((width_actual )))
 
         if sub_bench > 1:
             sub_bench -= 1
         #idx = idx + (sub_bench)*(width + 4)
-        end_pos = idx 
-            
+        end_pos = idx
+
         plt.ylim(0.1*100, 175)
         # put xticks according to b
         if end_pos == start_pos:
@@ -896,16 +918,21 @@ def plot_llc_change():
     print(xticks, xlabels)
     print(idxxx, np.diff(np.array(idxxx)))
 
-    #plt.tight_layout()
-    plt.subplots_adjust(bottom=0.25)
+    if PAPER:
+        paper_ticks  = [(min(v) + max(v)) / 2 for v in suite_positions.values()]
+        paper_labels = list(suite_positions.keys())
+        plt.xticks(paper_ticks, paper_labels, rotation=0, ha='center', fontsize=_font)
+    else:
+        plt.xticks(xticks, xlabels, rotation=85, ha='center', fontsize=_font)
 
-    plt.title("Memory location impact on number of LLC misses observed in the real machine")
-              #Ratio of LLC misses in the real machine observed in the slow tier vs fast tier")
-    plt.xlabel("Benchmark")
-    plt.ylabel("LLC miss (%)")
-        
-    plt.xticks(xticks, xlabels, rotation=85, ha='center')
-    plt.savefig("./___________BARO.png")
+    plt.title("Real: Memory tier effect on detected LLC miss count", fontsize=_font)
+    plt.xlabel("Benchmark suite", fontsize=_font)
+    plt.ylabel("LLC miss (%)", fontsize=_font)
+    if PAPER:
+        plt.tight_layout()
+    else:
+        plt.subplots_adjust(bottom=0.25)
+    plt.savefig("./___________BARO.pdf")
 
     # Set the legend properties
     #plt.legend(["Blue = speccpu", "Orange = gapbs", "Pink = NPB", "Green = parsec"], facecolor='white', framealpha=1, fontsize='x-small', loc='upper center', bbox_to_anchor=(0.5, -0.05), ncol=4, fancybox=True, shadow=True)
@@ -9362,6 +9389,28 @@ def moment_metric_paper():
     PAPER = False
     exit(0)
 
+def moment_metric_stalls_paper():
+    global NORM
+    global BY_MOMENT
+    global PAPER
+    global OTHER_X_KEYS
+    global SHOULD_PLOT_KEY
+    _STALL_KEYS = {
+        'Instruction Stall cycles',
+        '∆ Instruction Stall cycles',
+        'Instruction Stall cycles/MLP',
+        '∆ Instruction Stall cycles/MLP',
+    }
+    SHOULD_PLOT_KEY = lambda x: x in _STALL_KEYS
+    BY_MOMENT = True
+    PAPER = True
+    NORM = "user"
+    OTHER_X_KEYS = [SLOWP]
+    metric_eval()
+    SHOULD_PLOT_KEY = lambda x: True
+    PAPER = False
+    exit(0)
+
 def erview():
     global ERROR_VIEW
     global NORM
@@ -11726,7 +11775,7 @@ np.array(all_together['commitedL3Misses']), all_together
                 plt.figure()
                 #plt.figure(figsize=(20,20))
             else:
-                plt.figure(figsize=(5.5, 4.5) if PAPER else (20, 20))
+                plt.figure(figsize=(3.33, 2.5) if PAPER else (20, 20))
             
 
             #print(all_together[k])
