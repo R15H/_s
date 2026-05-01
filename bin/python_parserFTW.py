@@ -9396,6 +9396,22 @@ def moment_metric_paper():
     PAPER = False
     exit(0)
 
+def llc_change_paper():
+    global NORM
+    global BY_MOMENT
+    global PAPER
+    global OTHER_X_KEYS
+    global SHOULD_PLOT_KEY
+    BY_MOMENT = True
+    PAPER = True
+    NORM = "user"
+    OTHER_X_KEYS = [SLOWP]
+    SHOULD_PLOT_KEY = lambda x: x == 'LLC change (%)'
+    metric_eval()
+    SHOULD_PLOT_KEY = lambda x: True
+    PAPER = False
+    exit(0)
+
 def moment_metric_stalls_paper():
     global NORM
     global BY_MOMENT
@@ -12249,7 +12265,7 @@ np.array(all_together['commitedL3Misses']), all_together
 
             corrLabel = "Correlation"
             title_map = {
-                "slowdown": "Correlation w/slowdown",
+                "slowdown": "Pearson Correlation w/Slowdown",
                 "llc": "Rank correlation w/LLC misses",
             }
             X = 2  # Expected baseline DATASET
@@ -12290,7 +12306,11 @@ np.array(all_together['commitedL3Misses']), all_together
 
             def compress_corr_x(values):
                 values = np.asarray(values, dtype=float)
-                return np.where(values < 0, values / 4.0, values)
+                return np.select(
+                    [values < 0, values <= 0.5],
+                    [values / 4.0, values / 4.0],
+                    default=0.125 + (values - 0.5),
+                )
 
             def draw_axis(ax, df, corr_mode, show_y=True):
                 row_debug_lines = []
@@ -12314,14 +12334,14 @@ np.array(all_together['commitedL3Misses']), all_together
 
                 ax.axvline(0, color='0.55', linewidth=0.6, zorder=0)
                 ax.grid(axis='x', alpha=0.18, linewidth=0.5)
-                ax.set_xlim(-0.25, 1.0)
-                ticks = [-1, -0.5, 0, 0.5, 1]
+                ax.set_xlim(-0.25, 0.625)
+                ticks = [-1, -0.5, 0, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
                 ax.set_xticks(compress_corr_x(ticks))
                 ax.set_xticklabels([str(t) for t in ticks])
                 ax.set_xlabel('Correlation')
                 ax.set_title(title_map[corr_mode])
                 if show_y:
-                    ax.set_ylabel('Metric')
+                    ax.set_ylabel('Instruction Metric')
                 else:
                     ax.tick_params(axis='y', labelleft=False)
                     ax.set_ylabel('')
