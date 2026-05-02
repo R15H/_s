@@ -1,4 +1,28 @@
 #!/bin/bash
+#
+# bin/parse.sh — compile sample_parser and process gem5 output PIDs in parallel
+#
+# PURPOSE
+#   Compiles sample_parser.c with gcc -O3, then for each PID found in
+#   results_gem5/gem5_pids.txt runs sample_parser against the matching
+#   global_*, inst_*, and aggregate_* files to produce structured per-run
+#   result directories (results_gem5/<pid>-<machine>/).
+#
+# ROLE IN PIPELINE  (step 2 of 4 — result parsing)
+#   controller.sh writes output_* / err_* and gem5_pids.txt
+#     → parse.sh:go() compiles sample_parser and processes all PIDs with
+#       up to 10 parallel workers (xargs -P 10)
+#     → results_gem5/<pid>-<machine>/ directories
+#     → bin/CLOSER.py and bin/python_parserFTW.py read these directories
+#
+# ENTRY POINTS
+#   go()        — compile + process all synth PIDs from gem5_pids.txt
+#   gop <dir>   — compile + process cg.D PIDs from a specific results folder
+#   safe <N> <bench> — process last N entries matching bench
+#
+# USAGE
+#   ./bin/parse.sh go
+#   ./bin/parse.sh safe 50 bcu
 
 results_folder="/mnt/nas/inesc/ist196723/osdi26/results_gem5"
 gem5_pids_folder=$results_folder

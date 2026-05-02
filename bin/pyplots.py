@@ -1,3 +1,23 @@
+# bin/pyplots.py — runtime comparison plotter reading from super_desired
+#
+# PURPOSE
+#   Reads the super_desired table produced by real_analysis.sh and plots per-
+#   benchmark, per-metric comparisons (promotions, demotions, stalls, hit
+#   ratio, time) across memory systems and DRAM configurations.  Supports
+#   time-range filtering so only recent runs are included.
+#
+# ROLE IN PIPELINE  (step 4 of 4 — real-run summary path)
+#   real_analysis.sh → super_desired → pyplots.py → figures
+#
+# KEY TYPES
+#   BenchmarkConfig  — dataclass mapping a benchmark ID to a display name and
+#                      optional DRAM config filter
+#   BENCHMARK_CONFIGS — registry of active benchmarks (bcu, cg, mg)
+#
+# KEY HELPERS
+#   _parse_since(spec)       — convert "today"/"Nd"/"Nh"/Unix-ts to a cutoff
+#   _normalize_base(base)    — collapse repeated trailing segments (FOO-299-299 → FOO-299)
+
 import os
 import re
 import time

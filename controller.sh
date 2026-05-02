@@ -1,9 +1,66 @@
 #!/bin/bash
+#
+# controller.sh — central orchestration script for gem5 memory-tiering experiments
+#
+# PURPOSE
+#   Defines all functions needed to run GAPBS and NPB benchmarks under gem5
+#   with varying DRAM sizes, latency increases, and memory system configurations
+#   (ASMEM, MEMTIS, TPP).  Also contains utilities for monitoring, result
+#   inspection, and latency-map annotation.
+#
+#   This is the canonical version.  c.sh is an older copy (~500 fewer lines)
+#   kept for reference; controllerDUVIDO.sh is another variant.
+#
+# USAGE
+#   Sourced by other scripts for interactive use:
+#     source controller.sh        # in load_images.sh, then call functions directly
+#   Or called directly to run a named function:
+#     ./controller.sh rungem5_with_report benchset 1 80 <gem5_cmd...>
+#
+# ROLE IN PIPELINE  (step 1 of 4)
+#   ┌─ controller.sh ──────────────────────────────────────────────────────────┐
+#   │  Launches gem5 runs → writes results_gem5/output_* and                  │
+#   │  appends STARTED/TERMINATED records to results_gem5/gem5_pids.txt       │
+#   └──────────────────────────────────────────────────────────────────────────┘
+#       ↓  bin/parse.sh compiles sample_parser.c and processes the output files
+#       ↓  real_analysis.sh aggregates per-run metrics → super_desired
+#       ↓  bin/python_parserFTW.py / bin/plot_runtime.py produce plots
+#
+# KEY FUNCTIONS
+#   max_memory <pid>           — poll /proc/$pid/status and report peak RSS (KiB)
+#   prep / prepare             — set CPU to performance mode; warm binary with vmtouch
+#   rungem5_with_report <benchset> <benchnr> <increase> <cmd...>
+#                              — run one gem5 instance in background; log STARTED /
+#                                TERMINATED with exit code and timestamp
+#   wait_for_space             — throttle concurrency: block until < 13 gem5 jobs
+#                                are running on this host
+#   get_gem5_cmd_line          — print the gem5 invocation template
+#   synthethics_all_80         — run a full grid of synthetic benchmarks (latency=0)
+#   synthethics_all            — similar grid with a wider arand/aptr parameter range
+#   make_table_readable        — annotate a latency-map file with addr2line symbols
+#   glatTable                  — batch addr2line annotation for all maps in
+#                                final_data/maps/ → final_data/maps_human/
+#   short_executions           — inspect gem5_pids.txt for short / long / crashed runs
+#   current_runs               — tail the relevant portion of gem5_pids.txt
+#   slout / slerr              — page through the most recent output / error files
+#
+# KEY GLOBALS
+#   BINARY, ARGS, STDIN, WORKDIR — current benchmark specification
+#   DRAM                         — DRAM size in GiB for the current run
+#   GEM5, CONFIG                 — paths to the gem5 binary and config script
+#   benchset, benchnr, increase  — run-identification triple recorded in gem5_pids.txt
+#   SKIP_SECONDS, TIMEOUT_SECONDS— fast-forward and wall-clock timeout for gem5
+#
+# OUTPUT FILES  (all under results_gem5/)
+#   output_<benchset>_<benchnr>_<increase>_  — gem5 stdout
+#   err_<benchset>_<benchnr>_<increase>_     — gem5 stderr
+#   gem5_pids.txt                             — STARTED/TERMINATED audit log
+
 VMTOUCH="/usr/bin/vmtouch"
 nas="/mnt/nas/inesc/ist196723"
 folder="/mnt/nas/inesc/ist196723/osdi26/"
 
-#set -x 
+#set -x
 #set -e
 
 HUGE_SPLIT=""

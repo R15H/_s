@@ -1,7 +1,27 @@
+# bin/CLOSER.py — gem5 simulation result analysis and error-metric visualisation
+#
+# PURPOSE
+#   Loads per-benchmark gem5 simulation results (global_stat, instruction_data,
+#   aggregate_data) and evaluates how well various PMU-derived metrics predict
+#   the observed slowdown.  Produces bar charts of MSE/R² for each predictor.
+#
+# ROLE IN PIPELINE  (step 4 of 4 — gem5 analysis path)
+#   results_gem5/<pid>-<host>/ directories (from bin/parse.sh)
+#     → CLOSER.py:iterate_over_benches() → final_data/gen/pmu_pred/*.png
+#
+# KEY GLOBALS
+#   RUN_DATA_FOLDER  — path to processed gem5 result directories
+#   FIGS_FOLDER      — output directory for figures
+#
+# KEY FUNCTIONS
+#   iterate_over_benches(data, function) — iterate all (bench, dram) pairs
+#   pot_errors(data, loader, ...)        — compute and plot MSE for all
+#                                          pred_* keys vs real_slow_down
+
 from ctypes  import *
 global_only = False
 
-import os 
+import os
 AGGREGATE = "aggregate_data"
 GLOBAL = "global_stat"
 INST = "instruction_data"

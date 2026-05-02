@@ -1,4 +1,45 @@
 # -*- coding: utf-8 -*-
+# bin/python_parserFTW.py — main analysis and plotting script for OSDI26 experiments
+#
+# PURPOSE
+#   The primary entry point for generating all publication figures.  Called with
+#   --function <name>() to dispatch to any analysis or plotting function defined
+#   in this module (and all modules it imports).  Supports both gem5 and real
+#   hardware result paths.
+#
+# USAGE
+#   python3 bin/python_parserFTW.py --function "<func_name>([args])"
+#   python3 bin/python_parserFTW.py --skip_gem5 --function "BALAsamp_cost()"
+#   python3 bin/python_parserFTW.py --override-dataset 1 --function "pbench()"
+#
+# ROLE IN PIPELINE  (step 4 of 4 — visualisation, main path)
+#   Reads from:
+#     final_data/_mu_inst/          — per-instruction metrics (scatter/CDF plots)
+#     super_desired                 — aggregated real-run table (moment_metric plots)
+#     ~/nas/all_results             — raw result lines (pbench, plot_runtime)
+#   Writes PDFs/PNGs to $FIGS_FOLDER and report/
+#
+# FILE TRACKING
+#   Overrides open() and plt.savefig() with wrappers that record every file
+#   opened and created.  At exit, prints "=== Files opened ===" and
+#   "=== Files created ===" summaries — useful for auditing what a function
+#   actually read and wrote.
+#
+# KEY FUNCTIONS (non-exhaustive — see README.md for full invocation examples)
+#   scatter_combined_access_stalls_mlp()  — scatter + CDF in one figure
+#   scatter_only_bc_mgC_cgD([paper=True]) — 1×3 scatter grid
+#   moment_metric([paper=True])           — per-moment metric scatter
+#   stalls_4panel_paper()                 — 2×2 stall panel
+#   BALAsamp_cost([paper=True])           — sampling overhead scatter
+#   pbench()                              — parallel-coordinate correlation panels
+#   all_over_time_real()                  — time-series overlays (delegates to
+#                                           python_parser.py)
+#
+# KEY FLAGS
+#   --skip_gem5          skip loading gem5 simulation data
+#   --override-dataset N use dataset N instead of the default
+#   --parallel-corr-mode {slowdown|llc|both}
+
 from ctypes  import *
 import collections
 global_only = False
@@ -4173,6 +4214,60 @@ def BALAsamp_cost():
 
         print(bala_lines)
         """
+
+
+def BALAsamp_cost_paper():
+        """Paper-ready version of BALAsamp_cost.
+        python3 bin/python_parserFTW.py --skip_gem5 --function "BALAsamp_cost_paper()"
+        → $FIGS_FOLDER/../report/synthethic_cost_intensity_paper.pdf
+        """
+        f = "/mnt/nas/inesc/ist196723/samp_costCPU"
+        STOCK_COST = 26759491419
+
+        intensity = []
+        cost = []
+        with open(f, 'r') as file:
+            for l in file.readlines():
+                intensity.append(int(l.split(" ")[0]))
+                cost.append(int(l.split(" ")[1]))
+
+        intensity = np.array(intensity)
+        cost = np.array(cost)
+
+        maps = {
+            "1": 258, "2": 645, "6": 1450, "16": 3155, "38": 6262,
+            "90": 12551, "208": 25085, "490": 50356, "950": 85711, "2048": 156323,
+        }
+
+        iii, ii_mean, ii_err = [], [], []
+        for i in np.unique(intensity):
+            mask = intensity == i
+            vals = cost[mask] * 100 / STOCK_COST
+            m = np.mean(vals)
+            s = np.std(vals, ddof=1)
+            n = np.sum(mask)
+            iii.append(maps[str(i)])
+            ii_mean.append(m)
+            if n > 1:
+                tval = stats.t.ppf(0.975, df=n - 1)
+                ii_err.append(tval * s / np.sqrt(n))
+            else:
+                ii_err.append(0.0)
+
+        figsize = (3.5, 2.5)
+        fs = 7
+        plt.figure(figsize=figsize)
+        plt.rcParams.update({'font.size': fs, 'axes.labelsize': fs,
+                             'xtick.labelsize': fs, 'ytick.labelsize': fs})
+        plt.xscale('log')
+        plt.errorbar(iii, ii_mean, yerr=ii_err, fmt='o', capsize=3, markersize=3, linewidth=0.8)
+        plt.xlabel("Number of instructions")
+        plt.ylabel("CPU overhead (%)")
+        plt.tight_layout()
+        out = f"{FIGS_FOLDER}/../report/synthethic_cost_intensity_paper.pdf"
+        plt.savefig(out, bbox_inches='tight', dpi=600)
+        plt.close()
+        print("saved", out)
 
 
 """
@@ -11190,47 +11285,78 @@ np.array(all_together['commitedL3Misses']), all_together
             # do cdf of slow down (plot global_slwo down in black, and the metric in white) 
             COLOR_BY_LLC = False
             def plot_access_count_over_latency():
-                lat_threshold = []
-                count = []
-                #fcount = []
-                #scount = []
-                color = []
-                for n in range(0,16):
-                    lat_threshold.append(n*16)
-                    lat_threshold.append((n+0.5)*16)
-                    count.append(np.sum(all_together['fcount' + str(n)])) # includes all accesses above threshold
-                    color.append('blue')
-                    count.append(np.sum( all_together['scount' + str(n)] ))
-                    color.append('orange')
-            
-                plt.xticks([n*16 for n in range(0,16)])
+                import matplotlib.patches as mpatches
+                import matplotlib
+                matplotlib.rcParams.update({
+                    'font.family': 'serif',
+                    'font.size': 10,
+                    'axes.labelsize': 10,
+                    'xtick.labelsize': 8,
+                    'ytick.labelsize': 9,
+                    'legend.fontsize': 9,
+                    'axes.linewidth': 0.8,
+                    'xtick.major.width': 0.8,
+                    'ytick.major.width': 0.8,
+                    'pdf.fonttype': 42,
+                    'ps.fonttype': 42,
+                })
 
+                fast_counts = []
+                slow_counts = []
+                thresholds = []
+                for n in range(0, 16):
+                    thresholds.append(n * 16)
+                    fast_counts.append(np.sum(all_together['fcount' + str(n)]))
+                    slow_counts.append(np.sum(all_together['scount' + str(n)]))
 
-                
-                def p(unit):
-                    plt.xlabel("Access detetection threshold")
-                    plt.ylabel("Number of accesses" + unit)
-                    plt.title("Number of accesses in function of sampling threshold")
-                    plt.legend()
-                    import matplotlib.patches as mpatches
-                    legend_patches = [
-                mpatches.Patch(color='orange', label='Slow tier' ),
-                mpatches.Patch(color='blue', label='Fast tier' )
-                    ]
-                    plt.legend(handles=legend_patches, loc='upper left')
+                thresholds = np.array(thresholds)
+                fast_counts = np.array(fast_counts, dtype=float)
+                slow_counts = np.array(slow_counts, dtype=float)
+                bar_w = 6
 
-                    file = (
-                        f'./_finos/fii/{folder}/{sf}_ACCESS_DIST_' + unit + DATASET_S +    ".pdf"
-                    )
-                    print("SAVED FIG TO ", file)
-                    plt.savefig(file, bbox_inches='tight')
-                    plt.close()
+                legend_patches = [
+                    mpatches.Patch(color='#1f77b4', label='Fast tier'),
+                    mpatches.Patch(color='#ff7f0e', label='Slow tier'),
+                ]
 
-                w = 7
-                plt.figure(figsize=(14, 5)); plt.bar(lat_threshold, np.log(np.array(count)), width=w, color=color)
-                p(unit=" (log)")
-                plt.figure(figsize=(14, 5)); plt.bar(lat_threshold, np.array(count), width=w, color=color)
-                p(unit="")
+                def save_fig(fig, unit_tag):
+                    file = f'./_finos/fii/{folder}/{sf}_ACCESS_DIST_{unit_tag}{DATASET_S}.pdf'
+                    print("SAVED FIG TO", file)
+                    fig.savefig(file, bbox_inches='tight')
+                    plt.close(fig)
+
+                # --- linear scale ---
+                fig, ax = plt.subplots(figsize=(3.5, 2.5))
+                ax.bar(thresholds - bar_w/2, fast_counts, width=bar_w, color='#1f77b4', label='Fast tier')
+                ax.bar(thresholds + bar_w/2, slow_counts, width=bar_w, color='#ff7f0e', label='Slow tier')
+                ax.set_xlabel("Access detection threshold (cycles)", labelpad=4)
+                ax.set_ylabel("Number of accesses", labelpad=4)
+                ax.set_xticks(thresholds)
+                ax.set_xticklabels([str(v) for v in thresholds], rotation=45, ha='right')
+                ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
+                    lambda v, _: f'{v/1e6:.0f}M' if v >= 1e6 else (f'{v/1e3:.0f}K' if v >= 1e3 else str(int(v)))))
+                ax.grid(True, axis='y', linestyle='--', linewidth=0.5, alpha=0.6, color='gray')
+                ax.spines['top'].set_visible(False)
+                ax.spines['right'].set_visible(False)
+                ax.legend(handles=legend_patches, frameon=False, loc='upper right')
+                fig.tight_layout(pad=0.5)
+                save_fig(fig, "")
+
+                # --- log scale ---
+                fig, ax = plt.subplots(figsize=(3.5, 2.5))
+                ax.bar(thresholds - bar_w/2, fast_counts, width=bar_w, color='#1f77b4', label='Fast tier')
+                ax.bar(thresholds + bar_w/2, slow_counts, width=bar_w, color='#ff7f0e', label='Slow tier')
+                ax.set_yscale('log')
+                ax.set_xlabel("Access detection threshold (cycles)", labelpad=4)
+                ax.set_ylabel("Number of accesses (log scale)", labelpad=4)
+                ax.set_xticks(thresholds)
+                ax.set_xticklabels([str(v) for v in thresholds], rotation=45, ha='right')
+                ax.grid(True, axis='y', linestyle='--', linewidth=0.5, alpha=0.6, color='gray')
+                ax.spines['top'].set_visible(False)
+                ax.spines['right'].set_visible(False)
+                ax.legend(handles=legend_patches, frameon=False, loc='upper right')
+                fig.tight_layout(pad=0.5)
+                save_fig(fig, "log")
 
             AGG_FUNCTIONS.append(plot_access_count_over_latency)
             if LIMIT_BY_AGG:

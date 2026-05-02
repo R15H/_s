@@ -1,4 +1,22 @@
-import matplotlib.pyplot as plt 
+# bin/SY.py — synthetic benchmark result plotter (pointer-chasing vs streaming)
+#
+# PURPOSE
+#   Reads synthetic memory-access benchmark results from a flat text file and
+#   plots runtime vs DRAM size broken down by system (ASMEM, MEMTIS, TPP) and
+#   the random/pointer-access mix (arand/aptr ratio).
+#
+# ENTRY POINT
+#   plot_r()  — reads the file configured via the `file` variable (currently
+#               "sinn_all" under ~/nas/inesc/ist196723/) and calls do_plot()
+#               to generate matplotlib figures
+#
+# ROLE IN PIPELINE  (step 4 of 4 — synthetic result path)
+#   ~/nas/synthethic_results or ~/nas/sinn_all
+#     → SY.py:plot_r() → matplotlib figures
+#   Counterpart to bin/pyplots.py (which reads the same format but is the
+#   newer version used for publication figures).
+
+import matplotlib.pyplot as plt
 import os
 import numpy as np
 

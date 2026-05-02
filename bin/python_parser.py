@@ -1,3 +1,24 @@
+# bin/python_parser.py — time-series loader and plotter for real experimental runs
+#
+# PURPOSE
+#   Loads the per-system time-series vector files produced by real_analysis.sh
+#   (listed in over_time_files) and generates overlay plots comparing ASMEM vs
+#   MEMTIS-1 across metrics: hit ratio, stall counts, promotions/demotions.
+#
+# ENTRY POINTS
+#   all_over_time_real()     — main function; invokes real_analysis.sh if
+#                              over_time_files does not exist, then plots
+#   iterate_over_benches()   — called from load_images.sh via pbench_do
+#
+# ROLE IN PIPELINE  (step 4 of 4 — visualisation, time-series path)
+#   real_analysis.sh (get_over_time_all) → over_time_files manifest
+#       → python_parser.py:all_over_time_real() → plots
+#   Also used by load_images.sh for interactive benchmark iteration.
+#
+# KEY CONSTANTS
+#   MLP_PRECISION_FACTOR = 1024  — fixed-point scaling for MLP values
+#   OLD_V4               = True  — enables v4-format result parsing
+
 from ctypes  import *
 import collections
 global_only = False
